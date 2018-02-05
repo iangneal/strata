@@ -29,10 +29,10 @@ time_stat.o: time_stat.c
 
 hash_bench: hash_bench.o time_stat.o xxhash.o
 	$(CXX) -std=c++11 $(INCLUDES) -g -o $@ $^ -lrt -lpthread  \
-		-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) -lglib-2.0 \
-		-Wl,-rpath=$(abspath $(CITYHASH_DIR)/.libs) -L$(abspath $(CITYHASH_DIR)/.libs) -lcityhash  \
-		-L$(abspath $(JUDY_DIR)/obj/.libs) -lJudy -Wl,-rpath=$(abspath $(JUDY_DIR)/obj/.libs) \
-		-L$(abspath $(C_LIBCUCKOO_DIR)/.libs) -lcuckoo_hash -Wl,-rpath=$(abspath $(C_LIBCUCKOO_DIR)/.libs)
+	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) -lglib-2.0 \
+	-Wl,-rpath=$(abspath $(CITYHASH_DIR)/.libs) -L$(abspath $(CITYHASH_DIR)/.libs) -lcityhash  \
+	-L$(abspath $(JUDY_DIR)/obj/.libs) -lJudy -Wl,-rpath=$(abspath $(JUDY_DIR)/obj/.libs) \
+	-L$(abspath $(C_LIBCUCKOO_DIR)/.libs) -lcuckoo_hash -Wl,-rpath=$(abspath $(C_LIBCUCKOO_DIR)/.libs)
 
 clean:
 	rm -rf $(EXE) *.o

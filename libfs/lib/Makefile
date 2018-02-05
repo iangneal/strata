@@ -1,6 +1,7 @@
-.PHONY: download all clean
+.PHONY: redownload all clean
 
 all:
+	(cd libcuckoo-c && ./bootstrap.sh && ./configure && make -j8)
 	(cd spdk && ./configure && make -j8)
 	make -C nvml -j8
 
@@ -10,11 +11,17 @@ all:
 #but it breaks SPDK compilation
 redownload:
 	########
-	# 	NVML
+	#   NVML
 	########
 	@rm -rf nvml
 	git clone https://github.com/pmem/nvml
+	#############
+	# LIBCUCKOO-C
+	#############
+	@rm -rf libcuckoo-c
+	git clone https://github.com/kroki/Cuckoo-hash libcuckoo-c#
 
 clean:
 	make clean -C spdk
 	make clean -C nvml
+	make clean -C libcuckoo-c

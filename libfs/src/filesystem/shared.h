@@ -8,6 +8,10 @@
 #include "ds/bitmap.h"
 #include "ds/khash.h"
 
+#ifdef HASHING
+#include "cuckoo_hash.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -110,7 +114,7 @@ typedef struct logheader {
 	// inode, unlink: no used.
 	offset_t data[g_max_blocks_per_operation];
 	uint32_t length[g_max_blocks_per_operation];
-	// block number of on-disk log data blocks. 
+	// block number of on-disk log data blocks.
 	addr_t blocks[g_max_blocks_per_operation];
 	// block number of next logheader. 0 if no next log.
 	addr_t next_loghdr_blkno;
@@ -160,8 +164,8 @@ struct dinode {
 	mlfs_time_t mtime;
 
 	addr_t l1_addrs[NDIRECT+1];	//direct block addresses: 64 B
-	addr_t l2_addrs[NDIRECT+1];	
-	addr_t l3_addrs[NDIRECT+1];	
+	addr_t l2_addrs[NDIRECT+1];
+	addr_t l3_addrs[NDIRECT+1];
 }; // 256 bytes.
 
 #define setup_ondisk_inode(dip, dev, type) \
@@ -209,7 +213,7 @@ struct inode {
 
 	union {
 		/* the first 12 bytes of i_data is root extent_header */
-		uint32_t i_data[15]; 
+		uint32_t i_data[15];
 		uint32_t i_block[15];
 
 		addr_t addrs[NDIRECT+1];    // Data block addresses
@@ -217,7 +221,7 @@ struct inode {
 
 	union {
 		/* the first 12 bytes of i_data is root extent_header */
-		uint32_t i_data[15]; 
+		uint32_t i_data[15];
 		uint32_t i_block[15];
 
 		addr_t addrs[NDIRECT+1];    // Data block addresses
@@ -225,7 +229,7 @@ struct inode {
 
 	union {
 		/* the first 12 bytes of i_data is root extent_header */
-		uint32_t i_data[15]; 
+		uint32_t i_data[15];
 		uint32_t i_block[15];
 
 		addr_t addrs[NDIRECT+1];    // Data block addresses
@@ -284,9 +288,12 @@ struct inode {
 
 	///////////////////////////////////////////////////////////////////
 	/* for testing */
-	struct db_handle *i_db; 
+	struct db_handle *i_db;
 	int (*i_writeback)(struct inode *inode);
 	///////////////////////////////////////////////////////////////////
+#ifdef HASHING
+	struct cuckoo_hash* ch_table;
+#endif
 };
 
 static inline struct super_block* get_inode_sb(uint8_t dev, struct inode *inode)
@@ -312,13 +319,13 @@ struct mlfs_dirent {
 
 extern uint8_t *shm_base;
 #define LRU_HEADS (sizeof(struct list_head)) * 5
-#define BLOOM_HEAD 
+#define BLOOM_HEAD
 
 /* shared memory layout (bytes) for reserved region (the first 4 KB)
  *  0~ LRU_HEADS           : lru_heads region
  *  LRU_HEADS ~ BLOOM_HEAD : bloom filter for lsm tree search
- *  BLOOM_HEAD ~           : unused	
- */ 
+ *  BLOOM_HEAD ~           : unused
+ */
 struct list_head *lru_heads;
 
 typedef struct lru_key {
