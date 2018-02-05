@@ -22,7 +22,7 @@ extern "C" {
 // Block group expension is not implemented yet.
 
 typedef struct mlfs_kernfs_stats {
-	uint64_t digest_time_tsc; 
+	uint64_t digest_time_tsc;
 	uint64_t path_search_tsc;
 	uint64_t replay_time_tsc;
 	uint64_t apply_time_tsc;
@@ -39,6 +39,9 @@ extern struct super_block *sb[g_n_devices];
 extern kernfs_stats_t g_perf_stats;
 extern uint8_t enable_perf_stats;
 
+
+extern uint16_t *inode_version_table;
+
 // Inodes per block.
 #define IPB           (g_block_size_bytes / sizeof(struct dinode))
 
@@ -52,7 +55,7 @@ struct dirent_data {
 
 /* A bug note. UThash has a weird bug that
  * if offset is uint64_t type, it cannot find data
- * It is OK to use 32 bit because the offset does not 
+ * It is OK to use 32 bit because the offset does not
  * overflow 32 bit */
 typedef struct dcache_key {
 	uint32_t inum;
@@ -61,7 +64,7 @@ typedef struct dcache_key {
 
 // dirent array block (4KB) cache
 struct dirent_block {
-	dcache_key_t key; 
+	dcache_key_t key;
 	mlfs_hash_t hash_handle;
 	struct rb_node dblk_rb_node;
 	uint8_t dirent_array[g_block_size_bytes];
@@ -122,7 +125,7 @@ static inline struct inode *icache_alloc_add(uint8_t dev, uint32_t inum)
 	pthread_mutex_init(&inode->i_mutex, NULL);
 
 	INIT_LIST_HEAD(&inode->i_slru_head);
-	
+
 	pthread_spin_lock(&icache_spinlock);
 
 	HASH_ADD(hash_handle, inode_hash[dev], inum,
@@ -138,7 +141,7 @@ static inline struct inode *icache_add(struct inode *inode)
 	uint32_t inum = inode->inum;
 
 	pthread_mutex_init(&inode->i_mutex, NULL);
-	
+
 	pthread_spin_lock(&icache_spinlock);
 
 	HASH_ADD(hash_handle, inode_hash[inode->dev], inum,
@@ -160,15 +163,15 @@ static inline int icache_del(struct inode *ip)
 	return 0;
 }
 
-static inline 
+static inline
 __attribute__((optimize("-Ofast")))
-struct dirent_block *dcache_find(uint8_t dev, 
+struct dirent_block *dcache_find(uint8_t dev,
 		uint32_t inum, offset_t _offset)
 {
 	struct dirent_block *dir_block;
 	dcache_key_t key = {
 		.inum = inum,
-		.offset = (_offset >> g_block_size_shift),
+		.offset = (uint32_t)(_offset >> g_block_size_shift),
 	};
 
 	pthread_spin_lock(&dcache_spinlock);
@@ -181,9 +184,9 @@ struct dirent_block *dcache_find(uint8_t dev,
 	return dir_block;
 }
 
-static inline 
+static inline
 __attribute__((optimize("-Ofast")))
-struct dirent_block *dcache_alloc_add(uint8_t dev, 
+struct dirent_block *dcache_alloc_add(uint8_t dev,
 		uint32_t inum, offset_t offset, uint8_t *data)
 {
 	struct dirent_block *dir_block;
@@ -210,7 +213,7 @@ struct dirent_block *dcache_alloc_add(uint8_t dev,
 	return dir_block;
 }
 
-static inline struct inode *de_cache_find(struct inode *dir_inode, 
+static inline struct inode *de_cache_find(struct inode *dir_inode,
 		const char *name, offset_t *offset)
 {
 	struct dirent_data *dirent_data;
@@ -227,7 +230,7 @@ static inline struct inode *de_cache_find(struct inode *dir_inode,
 	}
 }
 
-static inline struct inode *de_cache_alloc_add(struct inode *dir_inode, 
+static inline struct inode *de_cache_alloc_add(struct inode *dir_inode,
 		const char *name, struct inode *inode, offset_t _offset)
 {
 	struct dirent_data *_dirent_data;
@@ -278,7 +281,7 @@ void read_root_inode(uint8_t dev);
 int read_ondisk_inode(uint8_t dev, uint32_t inum, struct dinode *dip);
 int write_ondisk_inode(uint8_t dev, struct inode *ip);
 int dir_add_entry(struct inode*, char*, uint32_t);
-int dir_change_entry(struct inode *dir_inode, char *oldname, 
+int dir_change_entry(struct inode *dir_inode, char *oldname,
 		char *newname, uint32_t new_inum);
 int dir_remove_entry(struct inode *dir_inode, char *name, uint32_t inum);
 uint8_t *get_dirent_block(struct inode *dir_inode, offset_t offset);
@@ -302,7 +305,7 @@ struct inode* iget(uint8_t dev, uint32_t inum);
 int mlfs_mark_inode_dirty(struct inode *inode);
 int persist_dirty_dirent_block(struct inode *inode);
 int persist_dirty_object(void);
-int digest_file(uint8_t from_dev, uint8_t to_dev, uint32_t file_inum, 
+int digest_file(uint8_t from_dev, uint8_t to_dev, uint32_t file_inum,
 		offset_t offset, uint32_t length, addr_t blknr);
 void show_storage_stats(void);
 
@@ -324,6 +327,9 @@ static inline addr_t get_inode_block(uint8_t dev, uint32_t inum)
 {
 	return (inum / IPB) + disk_sb[dev].inode_start;
 }
+
+void init_device_lru_list(void);
+void shared_memory_init(void);
 
 // Bitmap bits per block
 #define BPB           (g_block_size_bytes*8)

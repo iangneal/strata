@@ -47,9 +47,9 @@ struct super_block *sb[g_n_devices];
 ncx_slab_pool_t *mlfs_slab_pool;
 ncx_slab_pool_t *mlfs_slab_pool_shared;
 
-uint8_t g_log_dev = 0;
-uint8_t g_ssd_dev = 0;
-uint8_t g_hdd_dev = 0;
+uint8_t g_ssd_dev = 2;
+uint8_t g_hdd_dev = 3;
+uint8_t g_log_dev = 4;
 
 kernfs_stats_t g_perf_stats;
 uint8_t enable_perf_stats;
@@ -1918,7 +1918,7 @@ void mlfs_slab_init(uint64_t pool_size)
 }
 #endif
 
-static void shared_memory_init(void)
+void shared_memory_init(void)
 {
 	int ret;
 

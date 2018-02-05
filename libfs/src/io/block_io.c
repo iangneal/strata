@@ -33,7 +33,7 @@ struct buffer_head *bh_hash[g_n_devices + 1];
 pthread_rwlock_t *bcache_rwlock;
 
 static void reclaim_buffer(struct buffer_head *bh);
-struct buffer_head *buffer_alloc(struct block_device *bdev, 
+struct buffer_head *buffer_alloc(struct block_device *bdev,
 		addr_t block_nr, int page_size);
 
 void device_init(void)
@@ -42,7 +42,7 @@ void device_init(void)
 	pthread_rwlockattr_t rwlattr;
 
 	// dev_id = 1 - NVMM
-	// dev_id = 2 - SSD 
+	// dev_id = 2 - SSD
 	// dev_id = 3 - HDD
 	// dev_id > 4 - Per-application log
 	// ...
@@ -59,7 +59,7 @@ void device_init(void)
 		if (i == g_root_dev) {
 			g_bdev[i] = bdev_alloc(i, 12);
 			g_bdev[i]->storage_engine = &storage_dax;
-			g_bdev[i]->map_base_addr = 
+			g_bdev[i]->map_base_addr =
 				g_bdev[i]->storage_engine->init(i, g_dev_path[i]);
 		} else if (i == g_ssd_dev) {
 			g_bdev[i] = bdev_alloc(i, 12);
@@ -70,7 +70,7 @@ void device_init(void)
 #else
 			// for testing.
 			g_bdev[i]->storage_engine = &storage_dax;
-			g_bdev[i]->map_base_addr = 
+			g_bdev[i]->map_base_addr =
 				g_bdev[i]->storage_engine->init(i, g_dev_path[i]);
 #endif
 		} else if (i == g_hdd_dev) {
@@ -78,12 +78,12 @@ void device_init(void)
 			g_bdev[i]->storage_engine = &storage_hdd;
 			g_bdev[i]->map_base_addr = NULL;
 			g_bdev[i]->storage_engine->init(i, g_dev_path[i]);
-		} 
+		}
 		// libfs logs starting from devid 4
 		else {
 			g_bdev[i] = bdev_alloc_fast(i, 12);
 			g_bdev[i]->storage_engine = &storage_dax;
-			g_bdev[i]->map_base_addr = 
+			g_bdev[i]->map_base_addr =
 				g_bdev[i]->storage_engine->init(i, g_dev_path[i]);
 		}
 
@@ -100,7 +100,7 @@ void device_init(void)
 void device_shutdown(void)
 {
 	int i;
-	for (i = 1; i < g_n_devices + 1; i++) 
+	for (i = 1; i < g_n_devices + 1; i++)
 		bdev_free(g_bdev[i]);
 
 	return;
@@ -171,7 +171,7 @@ static inline struct buffer_head *bh_alloc_add(uint8_t dev,
 	pthread_rwlock_wrlock(bcache_rwlock);
 
 	HASH_ADD(hash_handle, bh_hash[dev], b_blocknr, sizeof(addr_t), bh);
-			
+
 	pthread_rwlock_unlock(bcache_rwlock);
 
 	return bh;
@@ -207,13 +207,13 @@ struct buffer_head *get_bh_from_cache(block_key_t key, uint8_t mode)
 	if (bh) {
 		// clean up previous buffer_head used for a different-sized IO.
 		if (bh->b_size != size) {
-			int refcount; 
+			int refcount;
 			refcount = put_bh_and_read(bh);
 
 			//mlfs_assert(refcount == 0);
 			bh_del(bh);
 
-			if (!buffer_data_ref(bh)) 
+			if (!buffer_data_ref(bh))
 				mlfs_free(bh->b_data);
 
 			goto alloc;
@@ -245,10 +245,10 @@ int bh_submit_read_sync_IO(struct buffer_head *bh)
 		// unaligned IO is only allowed in NVM.
 		// mlfs_assert(bh->b_dev != g_ssd_dev);
 		// mlfs_assert(bh->b_dev != g_hdd_dev);
-		ret = storage_engine->read_unaligned(bh->b_dev, bh->b_data, 
+		ret = storage_engine->read_unaligned(bh->b_dev, bh->b_data,
 				bh->b_blocknr, bh->b_offset, bh->b_size);
 	} else {
-		ret = storage_engine->read(bh->b_dev, bh->b_data, 
+		ret = storage_engine->read(bh->b_dev, bh->b_data,
 				bh->b_blocknr, bh->b_size);
 	}
 
@@ -269,7 +269,7 @@ struct buffer_head *mlfs_read_sync_IO(uint8_t dev, addr_t block_nr,
 
 	assert(size == g_block_size_bytes);
 	//mlfs_assert(blockno <= disk_sb[dev].size);
-	
+
 	b = get_bh_sync_IO(dev, block_nr, BUF_CACHE_ALLOC);
 
 	//pthread_spin_lock(&b->b_spinlock);
@@ -312,7 +312,7 @@ int mlfs_write(struct buffer_head *b)
 
 	storage_engine = g_bdev[b->b_dev]->storage_engine;
 	if (b->b_offset)
-		ret = storage_engine->write_unaligned(b->b_dev, b->b_data, 
+		ret = storage_engine->write_unaligned(b->b_dev, b->b_data,
 				b->b_blocknr, b->b_offset, b->b_size);
 	else
 		ret = storage_engine->write(b->b_dev, b->b_data, b->b_blocknr, b->b_size);
@@ -391,7 +391,7 @@ static int device_read(uint8_t dev, addr_t blocknr, int count, int blk_size,
 {
 	int ret;
 	struct storage_operations *storage_engine;
-	
+
 	mlfs_assert(blk_size == g_block_size_bytes);
 	mlfs_assert(count == 1);
 
@@ -409,10 +409,10 @@ static int device_write(uint8_t dev, addr_t blocknr, int count, int blk_size,
 {
 	int ret;
 	struct storage_operations *storage_engine;
-	
+
 	mlfs_assert(blk_size == g_block_size_bytes);
 	mlfs_assert(count == 1);
-	
+
 	storage_engine = g_bdev[dev]->storage_engine;
 	ret = storage_engine->write(dev, (uint8_t *)buf, blocknr, g_block_size_bytes);
 
@@ -534,7 +534,7 @@ struct block_device *bdev_alloc(uint8_t dev_id, int blocksize_bits)
 
 static void bdev_writeback_thread_notify(struct block_device *bdev)
 {
-	int ret; 
+	int ret;
 	signed char test_byte = 1;
 	ret = write(bdev->bd_bh_writeback_wakeup_fd[1], &test_byte, sizeof(test_byte));
 }
@@ -598,7 +598,7 @@ void bdev_free(struct block_device *bdev)
 	bdev_io_thread_notify_exit(bdev);
 	pthread_join(bdev->bd_bh_io_thread, NULL);
 #endif
-	
+
 	pthread_mutex_lock(&bdev->bd_bh_root_lock);
 	while ((node = rb_first(&bdev->bd_bh_root))) {
 		struct buffer_head *bh = rb_entry(
@@ -635,7 +635,7 @@ void sync_writeback_buffers(struct block_device *bdev)
 		bdev_writeback_thread_notify(bdev);
 }
 
-struct buffer_head *buffer_alloc(struct block_device *bdev, 
+struct buffer_head *buffer_alloc(struct block_device *bdev,
 		addr_t block_nr, int page_size)
 {
 	int ret;
@@ -649,7 +649,7 @@ struct buffer_head *buffer_alloc(struct block_device *bdev,
 	bh->b_bdev = bdev;
 	bh->b_dev = bdev->b_devid;
 	bh->b_data = (uint8_t *)(bh + 1);
-	bh->b_size = page_size; 
+	bh->b_size = page_size;
 	bh->b_offset = 0;
 	bh->b_blocknr = block_nr;
 	bh->b_count = 0;
@@ -808,7 +808,7 @@ void wait_on_buffer(struct buffer_head *bh, int isread)
 	int ret;
 
 	m_barrier();
-	
+
 	pthread_mutex_lock(&bh->b_wait_mutex);
 	pthread_mutex_unlock(&bh->b_wait_mutex);
 
@@ -850,7 +850,7 @@ int submit_bh(int is_write, struct buffer_head *bh)
 
 	add_buffer_to_ioqueue(bh);
 	bdev_io_thread_notify(bh->b_bdev);
-	
+
 	return 0;
 }
 
@@ -866,7 +866,7 @@ void after_buffer_sync(struct buffer_head *bh, int uptodate)
 	unlock_buffer(bh);
 
 	m_barrier();
-	
+
 	pthread_mutex_unlock(&bh->b_wait_mutex);
 }
 
@@ -1015,7 +1015,7 @@ void brelse(struct buffer_head *bh)
 
 	if (!buffer_dirty(bh))
 		reclaim_buffer(bh);
-	else 
+	else
 		move_buffer_to_writeback(bh);
 out:
 	return;
@@ -1049,7 +1049,7 @@ void sync_all_buffers(struct block_device *bdev)
 		cur = remove_first_buffer_from_writeback(bdev);
 		if (cur) {
 			sync_dirty_buffer(cur);
-			mlfs_debug("[dev %d], block %lu synced\n", 
+			mlfs_debug("[dev %d], block %lu synced\n",
 					cur->b_dev, cur->b_blocknr);
 		} else
 			break;
@@ -1083,7 +1083,7 @@ static void *buffer_writeback_thread(void *arg)
 			try_to_sync_buffers(bdev);
 			if (bdev_is_notify_exiting(command))
 				break;
-			
+
 			continue;
 		}
 		if (ret == 0) {
