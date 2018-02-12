@@ -39,9 +39,9 @@ NVML_DIR := $(abspath $(CURDIR)/lib/nvml/src)
 SPDK_DIR := $(abspath $(CURDIR)/lib/spdk)
 LIBSPDK_DIR := $(abspath $(CURDIR)/src/storage/spdk/)
 JEMALLOC_DIR := $(abspath $(CURDIR)/lib/jemalloc-4.5.0)
-C_LIBCUCKOO_DIR := $(abspath $(CURDIR)/lib/libcuckoo/src)
+C_LIBCUCKOO_DIR := $(abspath $(CURDIR)/lib/libcuckoo-c/src)
 
-INCLUDES := $(addprefix -I,src/ $(LIBSPDK_DIR) $(NVML_DIR)/include $(C_LIBCUCKOO))
+INCLUDES := $(addprefix -I,src/ $(LIBSPDK_DIR) $(NVML_DIR)/include $(C_LIBCUCKOO_DIR))
 
 LD_FLAGS = -lpthread -lm -L$(NVML_DIR)/nondebug/ -lpmem -lrt #-Wl,-fuse-ld=gold
 

@@ -1,7 +1,7 @@
 .PHONY: redownload all clean
 
 all:
-	(cd libcuckoo-c && ./bootstrap.sh && ./configure && make -j8)
+	(cd libcuckoo-c && ./bootstrap.sh && ./configure && make -j8 all check)
 	(cd spdk && ./configure && make -j8)
 	make -C nvml -j8
 

@@ -53,6 +53,23 @@ struct linux_dirent_tail {
 	unsigned char       d_type;
 };
 
+#ifdef HASHTABLE
+
+#define USE_GLIB_HASH 1
+#define USE_CUCKOO_HASH !(USE_GLIB_HASH)
+
+#if USE_CUCKOO_HASH
+#include "cuckoo_hash.h"
+typedef struct cuckoo_hash inode_hash_table;
+#elif USE_GLIB_HASH
+#include <glib/glib.h>
+typedef GHashTable inode_hash_table;
+#else
+#error "No hashtable specified for inodes in inode_hash.h!"
+#endif
+
+#endif
+
 #ifdef __cplusplus
 }
 #endif

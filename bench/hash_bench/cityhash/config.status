@@ -437,7 +437,7 @@ Copyright (C) 2012 Free Software Foundation, Inc.
 This config.status script is free software; the Free Software Foundation
 gives unlimited permission to copy, distribute and modify it."
 
-ac_pwd='/home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash'
+ac_pwd='/home/iangneal/gitmlfs/bench/hash_bench/cityhash'
 srcdir='.'
 INSTALL='/usr/bin/install -c'
 MKDIR_P='/bin/mkdir -p'
@@ -571,7 +571,7 @@ FGREP='/bin/grep -F'
 LD='/usr/bin/ld -m elf_x86_64'
 NM='/usr/bin/nm -B'
 LN_S='ln -s'
-max_cmd_len='1572864'
+max_cmd_len='3458764513820540925'
 ac_objext='o'
 exeext=''
 lt_unset='unset'
@@ -675,7 +675,7 @@ finish_cmds='PATH="\$PATH:/sbin" ldconfig -n $libdir'
 finish_eval=''
 hardcode_into_libs='yes'
 sys_lib_search_path_spec='/usr/lib/gcc/x86_64-linux-gnu/5 /usr/lib/x86_64-linux-gnu /usr/lib /lib/x86_64-linux-gnu /lib '
-sys_lib_dlsearch_path_spec='/lib /usr/lib /usr/lib/x86_64-linux-gnu/libfakeroot /usr/local/lib /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu/mesa-egl /usr/lib/x86_64-linux-gnu/mesa '
+sys_lib_dlsearch_path_spec='/lib /usr/lib /usr/lib/x86_64-linux-gnu/libfakeroot /usr/local/lib /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/lib/nvidia-384 /usr/lib32/nvidia-384 /usr/lib/nvidia-384 /usr/lib32/nvidia-384 /lib32 /usr/lib32 '
 hardcode_action='immediate'
 enable_dlopen='unknown'
 enable_dlopen_self='unknown'
@@ -941,12 +941,12 @@ S["mkdir_p"]="/bin/mkdir -p"
 S["MKDIR_P"]="/bin/mkdir -p"
 S["INSTALL_STRIP_PROGRAM"]="$(install_sh) -c -s"
 S["STRIP"]="strip"
-S["install_sh"]="${SHELL} /home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash/install-sh"
-S["MAKEINFO"]="${SHELL} /home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash/missing --run makeinfo"
-S["AUTOHEADER"]="${SHELL} /home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash/missing --run autoheader"
-S["AUTOMAKE"]="${SHELL} /home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash/missing --run automake-1.11"
-S["AUTOCONF"]="${SHELL} /home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash/missing --run autoconf"
-S["ACLOCAL"]="${SHELL} /home/iangneal/strata/gitmlfs/bench/hash_bench/cityhash/missing --run aclocal-1.11"
+S["install_sh"]="${SHELL} /home/iangneal/gitmlfs/bench/hash_bench/cityhash/install-sh"
+S["MAKEINFO"]="${SHELL} /home/iangneal/gitmlfs/bench/hash_bench/cityhash/missing --run makeinfo"
+S["AUTOHEADER"]="${SHELL} /home/iangneal/gitmlfs/bench/hash_bench/cityhash/missing --run autoheader"
+S["AUTOMAKE"]="${SHELL} /home/iangneal/gitmlfs/bench/hash_bench/cityhash/missing --run automake-1.11"
+S["AUTOCONF"]="${SHELL} /home/iangneal/gitmlfs/bench/hash_bench/cityhash/missing --run autoconf"
+S["ACLOCAL"]="${SHELL} /home/iangneal/gitmlfs/bench/hash_bench/cityhash/missing --run aclocal-1.11"
 S["VERSION"]="1.1.1"
 S["PACKAGE"]="cityhash"
 S["CYGPATH_W"]="echo"
@@ -973,7 +973,6 @@ S["infodir"]="${datarootdir}/info"
 S["docdir"]="${datarootdir}/doc/${PACKAGE_TARNAME}"
 S["oldincludedir"]="/usr/include"
 S["includedir"]="${prefix}/include"
-S["runstatedir"]="${localstatedir}/run"
 S["localstatedir"]="${prefix}/var"
 S["sharedstatedir"]="${prefix}/com"
 S["sysconfdir"]="${prefix}/etc"

@@ -8,10 +8,6 @@
 #include "ds/bitmap.h"
 #include "ds/khash.h"
 
-#ifdef HASHING
-#include "cuckoo_hash.h"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -291,8 +287,8 @@ struct inode {
 	struct db_handle *i_db;
 	int (*i_writeback)(struct inode *inode);
 	///////////////////////////////////////////////////////////////////
-#ifdef HASHING
-	struct cuckoo_hash* ch_table;
+#ifdef HASHTABLE
+	inode_hash_table *htable;
 #endif
 };
 
