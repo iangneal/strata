@@ -15,17 +15,25 @@
 #include "../slru.h"
 #include "../migrate.h"
 
+#include <algorithm>
+#include <cassert>
 #include <random>
 #include <iostream>
 #include <list>
 #include <vector>
-#include <cassert>
+#include <unordered_set>
 
 #include "time_stat.h"
 
 #define INUM 100
 
 using namespace std;
+
+enum SequenceType {
+  SEQUENTIAL = 0, REVERSE, RANDOM
+};
+
+const char* SequenceTypeNames[] = { "sequential", "reverse", "random" };
 
 class ExtentTest
 {
@@ -39,10 +47,15 @@ class ExtentTest
 
   static void hexdump(void *mem, unsigned int len);
 
+  list<mlfs_lblk_t> genLogicalBlockSequence(SequenceType s, mlfs_lblk_t from,
+      mlfs_lblk_t ti, uint32_t nr_block);
+
   void run_read_block_test(uint32_t inum, mlfs_lblk_t from,
     mlfs_lblk_t to, uint32_t nr_block);
   void run_multi_block_test(mlfs_lblk_t from, mlfs_lblk_t to,
     uint32_t nr_block);
+  void run_multi_block_test(list<mlfs_lblk_t> insert_order,
+    list<mlfs_lblk_t> lookup_order, int nr_block = 1);
   void run_ftruncate_test(mlfs_lblk_t from, mlfs_lblk_t to,
     uint32_t nr_block);
 };
@@ -173,6 +186,47 @@ void ExtentTest::hexdump(void *mem, unsigned int len)
   }
 }
 
+list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
+    mlfs_lblk_t from, mlfs_lblk_t to, uint32_t nr_block) {
+  std::random_device rd;
+  std::mt19937 mt(rd());
+  std::list<mlfs_lblk_t> merge_list;
+  std::unordered_set<mlfs_lblk_t> merge_set;
+  // inclusive range, so we don't want to go off the end.
+  std::uniform_int_distribution<mlfs_lblk_t> dist(from, to + 1 - nr_block);
+
+  int ntests = (to - from) / nr_block;
+
+  switch(s) {
+    case SEQUENTIAL:
+      for (mlfs_lblk_t f = 0; f < ntests; ++f) {
+        mlfs_lblk_t lb = from + (f * nr_block);
+        merge_list.push_back(lb);
+      }
+      break;
+    case REVERSE:
+      for (mlfs_lblk_t f = 0; f < ntests; ++f) {
+        mlfs_lblk_t lb = from + ((ntests - 1 - f) * nr_block);
+        merge_list.push_back(lb);
+      }
+      break;
+    case RANDOM:
+      // Create merge_set (set of unique, random, randomly ordered logical blocks)
+      while (merge_set.size() < ntests) {
+        merge_set.insert(dist(mt));
+      }
+      merge_list.insert(merge_list.begin(), merge_set.begin(), merge_set.end());
+      break;
+    default:
+      cerr << "No defined behavior for " << s << endl;
+      exit(-1);
+  }
+
+  assert(merge_list.size() == ntests);
+
+  return merge_list;
+}
+
 void ExtentTest::async_io_test(void)
 {
   int ret;
@@ -195,8 +249,8 @@ void ExtentTest::async_io_test(void)
   for (int i = 0; i < g_block_size_bytes ; i++)
     bh->b_data[i] = '0' + (i % 9);
 
-  set_buffer_dirty(bh);
-  fs_brelse(bh);
+    set_buffer_dirty(bh);
+    fs_brelse(bh);
   }
 
   sync_all_buffers(g_bdev[g_root_dev]);
@@ -285,7 +339,7 @@ void ExtentTest::run_multi_block_test(mlfs_lblk_t from,
   struct time_stats ls;
   std::random_device rd;
   std::mt19937 mt(rd());
-  std::vector<uint64_t> merge_list;
+  std::unordered_set<uint64_t> merge_set;
   mlfs_lblk_t start = from;
 
   handle_t handle = {.dev = g_root_dev};
@@ -293,18 +347,18 @@ void ExtentTest::run_multi_block_test(mlfs_lblk_t from,
 
   int ntests = (to - from) / (nr_block * g_block_size_bytes);
 
-  // Create merge_list (list of random logical blocks)
-  for (int i = 0; i < ntests; i++) {
-    merge_list.push_back(dist(mt) >> g_block_size_shift);
+  // Create merge_set (set of unique, random, randomly ordered logical blocks)
+  while (merge_set.size() < ntests) {
+    merge_set.insert(dist(mt) >> g_block_size_shift);
   }
 
   time_stats_init(&ts, 1);
   time_stats_init(&lookup, 1);
   time_stats_init(&hs, ntests);
   time_stats_init(&ls, ntests);
-#if 1
-  time_stats_start(&ts);
+
   /* populate all logical blocks */
+  time_stats_start(&ts);
   for (; from <= to; from += (nr_block * g_block_size_bytes)) {
     map.m_lblk = (from >> g_block_size_shift);
     map.m_len = nr_block;
@@ -327,13 +381,10 @@ void ExtentTest::run_multi_block_test(mlfs_lblk_t from,
     //    from, to, from, map.m_pblk, map.m_len);
   }
   time_stats_stop(&ts);
-#endif
 
-
-#if 1
-  time_stats_start(&lookup);
   /* random lookup */
-  for (uint64_t lblock : merge_list) {
+  time_stats_start(&lookup);
+  for (uint64_t lblock : merge_set) {
     map.m_lblk = lblock;
     map.m_len = 1;
     map.m_pblk = 0;
@@ -346,11 +397,11 @@ void ExtentTest::run_multi_block_test(mlfs_lblk_t from,
         strerror(-err), from, map.m_pblk);
     }
 
-    //fprintf(stdout, "LOOKUP [%d/%d] offset %u, block: %x -> %lx len %u\n",
-    //    i, (to - start), start, map.m_lblk, map.m_pblk, map.m_len);
+    //fprintf(stdout, "LOOKUP [%lu/%lu] offset %u, block: %x -> %lx len %u\n",
+    //    lblock, (to - start) / g_block_size_bytes, start,
+    //    map.m_lblk, map.m_pblk, map.m_len);
   }
   time_stats_stop(&lookup);
-#endif
 
   printf("** Total used block %d\n",
     bitmap_weight((uint64_t *)sb[g_root_dev]->s_blk_bitmap->bitmap,
@@ -407,16 +458,125 @@ void ExtentTest::run_ftruncate_test(mlfs_lblk_t from,
   }
 }
 
+
+void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
+  list<mlfs_lblk_t> lookup_order, int nr_block)
+{
+  int err;
+  struct buffer_head bh_got;
+  struct mlfs_map_blocks map;
+  struct time_stats ts;
+  struct time_stats lookup;
+  struct time_stats hs;
+  struct time_stats ls;
+
+  handle_t handle = {.dev = g_root_dev};
+
+  time_stats_init(&ts, 1);
+  time_stats_init(&lookup, 1);
+  time_stats_init(&hs, insert_order.size());
+  time_stats_init(&ls, lookup_order.size());
+
+  /* create all logical blocks */
+  time_stats_start(&ts);
+  for (mlfs_lblk_t lb : insert_order) {
+    map.m_lblk = lb;
+    map.m_len = nr_block;
+    time_stats_start(&hs);
+    err = mlfs_ext_get_blocks(&handle, inode, &map,
+      MLFS_GET_BLOCKS_CREATE);
+    time_stats_stop(&hs);
+    if (err < 0) {
+      fprintf(stderr, "err: %s, lblk %x, fsblk: %lx\n",
+        strerror(-err), lb, map.m_pblk);
+      exit(-1);
+    }
+
+    if (map.m_len != nr_block) {
+      cout << "request nr_block " << nr_block <<
+      " received nr_block " << map.m_len << endl;
+      exit(-1);
+    }
+
+    //fprintf(stdout, "INSERT [%d/%d] offset %u, block: %lx len %u\n",
+    //    from, to, from, map.m_pblk, map.m_len);
+  }
+  time_stats_stop(&ts);
+
+  /* lookup */
+  time_stats_start(&lookup);
+  for (mlfs_lblk_t lb : lookup_order) {
+    map.m_lblk = lb;
+    map.m_len = nr_block;
+    map.m_pblk = 0;
+    time_stats_start(&ls);
+    err = mlfs_ext_get_blocks(&handle, inode, &map, MLFS_GET_BLOCKS_CREATE);
+    time_stats_stop(&ls);
+
+    if (err < 0) {
+      fprintf(stderr, "err: %s, lblk %x, fsblk: %lx\n",
+        strerror(-err), lb, map.m_pblk);
+      exit(-1);
+    }
+
+    //fprintf(stdout, "LOOKUP [%u], block: %x -> %lx len %u\n",
+    //    lb, map.m_lblk, map.m_pblk, map.m_len);
+  }
+  time_stats_stop(&lookup);
+
+  printf("** Total used block %d\n",
+    bitmap_weight((uint64_t *)sb[g_root_dev]->s_blk_bitmap->bitmap,
+    sb[g_root_dev]->ondisk->ndatablocks));
+
+  cout << "truncate all allocated blocks" << endl;
+
+  mlfs_ext_truncate(&handle, inode, 0,
+      (*max_element(insert_order.begin(), insert_order.end())) - nr_block);
+
+  printf("** Total used block %d\n",
+    bitmap_weight((uint64_t *)sb[g_root_dev]->s_blk_bitmap->bitmap,
+    sb[g_root_dev]->ondisk->ndatablocks));
+
+  cout << "INSERT TIME (total)" << endl;
+  time_stats_print(&ts, NULL);
+  cout << "INSERT TIME (per insert [" << hs.n <<"] )" << endl;
+  time_stats_print(&hs, NULL);
+  cout << "LOOKUP TIME (total)" << endl;
+  time_stats_print(&lookup, NULL);
+  cout << "LOOKUP TIME (per lookup [" << ls.n <<"] )" << endl;
+  time_stats_print(&ls, NULL);
+}
+
+
 int main(int argc, char **argv)
 {
   ExtentTest cExtTest;
-  cExtTest.initialize();
 
   //cExtTest.async_io_test();
   //cExtTest.run_read_block_test(3, 0, 20 * g_block_size_bytes, 10);
   //cExtTest.run_multi_block_test(0, 100000 * g_block_size_bytes, 4);
-  cExtTest.run_multi_block_test(0, 100000 * g_block_size_bytes, 1);
+  //cExtTest.run_multi_block_test(0, 100000 * g_block_size_bytes, 1);
   //cExtTest.run_ftruncate_test(1 * g_block_size_bytes, 10 * g_block_size_bytes, 5);
+
+  if (argc < 3) {
+    cerr << "Usage: " << argv[0] << " INSERT_ORDER LOOKUP_ORDER" << endl;
+    return 1;
+  }
+
+  int i = atoi(argv[1]);
+  int l = atoi(argv[2]);
+
+  cExtTest.initialize();
+
+  printf("Insert: %s, Lookup: %s\n", SequenceTypeNames[i],
+      SequenceTypeNames[l]);
+
+  list<mlfs_lblk_t> insert = cExtTest.genLogicalBlockSequence(
+      (SequenceType)i, 0, 100000, 1);
+  list<mlfs_lblk_t> lookup = cExtTest.genLogicalBlockSequence(
+      (SequenceType)l, 0, 100000, 1);
+
+  cExtTest.run_multi_block_test(insert, lookup, 1);
 
   return 0;
 }

@@ -141,9 +141,18 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
     mlfs_fsblk_t pb = GPOINTER_TO_UINT(value);
     if (lb >= start && lb <= end) {
       mlfs_free_blocks(handle, inode, NULL, lb, 1, 0);
+      g_hash_table_iter_remove(&iter);
     }
   }
 #elif USE_CUCKOO_HASH
+  for (struct cuckoo_hash_item *cuckoo_hash_each(iter, inode->htable)) {
+    mlfs_lblk_t lb = iter->key;
+    mlfs_fsblk_t pb = iter->value;
+    if (lb >= start && lb <= end) {
+      mlfs_free_blocks(handle, inode, NULL, lb, 1, 0);
+      cuckoo_hash_remove(inode->htable, iter);
+    }
+  }
 #else
 #error "No mlfs_hash_truncate for this hash table!"
 #endif
