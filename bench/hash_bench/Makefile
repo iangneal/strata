@@ -27,7 +27,7 @@ all: $(EXE)
 time_stat.o: time_stat.c
 	$(CC) time_stat.c -c -o time_stat.o -D_BSD_SOURCE
 
-hash_bench: hash_bench.o time_stat.o xxhash.o
+hash_bench: hash_bench.o time_stat.o xxhash.o thashmap/thashmap.c
 	$(CXX) -std=c++11 $(INCLUDES) -g -o $@ $^ -lrt -lpthread  \
 	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) -lglib-2.0 \
 	-Wl,-rpath=$(abspath $(CITYHASH_DIR)/.libs) -L$(abspath $(CITYHASH_DIR)/.libs) -lcityhash  \

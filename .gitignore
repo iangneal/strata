@@ -18,5 +18,10 @@ libfs/lib/jemalloc-4.5.0
 # Benchmark data.
 libfs/tests/*.json
 
-# Build type things
+# Build/configure files.
 autom4te.cache/
+
+# Bench files.
+bench/hash_bench/hash_bench.o
+bench/hash_bench/time_stat.o
+bench/hash_bench/xxhash.o

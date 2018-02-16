@@ -1,3 +1,6 @@
 [submodule "bench/hash_bench/cuckoo-hash"]
 	path = bench/hash_bench/cuckoo-hash
 	url = https://github.com/kroki/Cuckoo-hash
+[submodule "bench/hash_bench/thashmap"]
+	path = bench/hash_bench/thashmap
+	url = https://github.com/Dahca/thashmap.git
