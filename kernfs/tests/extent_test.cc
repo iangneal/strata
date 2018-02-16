@@ -15,6 +15,7 @@
 #include "../slru.h"
 #include "../migrate.h"
 
+#include <sys/resource.h>
 #include <algorithm>
 #include <cassert>
 #include <random>
@@ -22,6 +23,7 @@
 #include <list>
 #include <vector>
 #include <unordered_set>
+#include <malloc.h>
 
 #include "time_stat.h"
 
@@ -193,7 +195,7 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
   std::list<mlfs_lblk_t> merge_list;
   std::unordered_set<mlfs_lblk_t> merge_set;
   // inclusive range, so we don't want to go off the end.
-  std::uniform_int_distribution<mlfs_lblk_t> dist(from, to + 1 - nr_block);
+  std::uniform_int_distribution<mlfs_lblk_t> dist(from, to);
 
   int ntests = (to - from) / nr_block;
 
@@ -213,7 +215,9 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
     case RANDOM:
       // Create merge_set (set of unique, random, randomly ordered logical blocks)
       while (merge_set.size() < ntests) {
-        merge_set.insert(dist(mt));
+        mlfs_lblk_t b = dist(mt);
+        mlfs_lblk_t off = b % nr_block;
+        merge_set.insert(b - off);
       }
       merge_list.insert(merge_list.begin(), merge_set.begin(), merge_set.end());
       break;
@@ -382,6 +386,8 @@ void ExtentTest::run_multi_block_test(mlfs_lblk_t from,
   }
   time_stats_stop(&ts);
 
+  sync_all_buffers(g_bdev[g_root_dev]);
+
   /* random lookup */
   time_stats_start(&lookup);
   for (uint64_t lblock : merge_set) {
@@ -469,6 +475,7 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   struct time_stats lookup;
   struct time_stats hs;
   struct time_stats ls;
+  struct rusage before, after;
 
   handle_t handle = {.dev = g_root_dev};
 
@@ -476,6 +483,10 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_init(&lookup, 1);
   time_stats_init(&hs, insert_order.size());
   time_stats_init(&ls, lookup_order.size());
+
+
+  err = getrusage (RUSAGE_SELF, &before);
+  if (err) cerr << "ERR: getrusage" << endl;
 
   /* create all logical blocks */
   time_stats_start(&ts);
@@ -502,6 +513,11 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
     //    from, to, from, map.m_pblk, map.m_len);
   }
   time_stats_stop(&ts);
+
+  err = getrusage(RUSAGE_SELF, &after);
+  if (err) cerr << "ERR: getrusage" << endl;
+
+  cout << "Mem used (kB): " << (after.ru_maxrss - before.ru_maxrss) << endl;
 
   /* lookup */
   time_stats_start(&lookup);
@@ -559,12 +575,14 @@ int main(int argc, char **argv)
   //cExtTest.run_ftruncate_test(1 * g_block_size_bytes, 10 * g_block_size_bytes, 5);
 
   if (argc < 3) {
-    cerr << "Usage: " << argv[0] << " INSERT_ORDER LOOKUP_ORDER" << endl;
+    cerr << "Usage: " << argv[0] << " INSERT_ORDER LOOKUP_ORDER" <<
+     " BLOCK_CHUCK_SIZE" <<  endl;
     return 1;
   }
 
   int i = atoi(argv[1]);
   int l = atoi(argv[2]);
+  int b = atoi(argv[3]);
 
   cExtTest.initialize();
 
@@ -572,11 +590,11 @@ int main(int argc, char **argv)
       SequenceTypeNames[l]);
 
   list<mlfs_lblk_t> insert = cExtTest.genLogicalBlockSequence(
-      (SequenceType)i, 0, 100000, 1);
+      (SequenceType)i, 0, 100000, b);
   list<mlfs_lblk_t> lookup = cExtTest.genLogicalBlockSequence(
-      (SequenceType)l, 0, 100000, 1);
+      (SequenceType)l, 0, 100000, b);
 
-  cExtTest.run_multi_block_test(insert, lookup, 1);
+  cExtTest.run_multi_block_test(insert, lookup, b);
 
   return 0;
 }

@@ -79,13 +79,18 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 	create = flags & MLFS_GET_BLOCKS_CREATE_DATA;
   int ret = map->m_len;
 
-  int pre = lookup_hash(inode, map->m_lblk, &newblock);
-
-  if (pre) {
-    map->m_pblk = newblock;
-    return ret;
+  // lookup all blocks.
+  uint32_t len = map->m_len;
+  for (uint32_t i = 0; i < map->m_len; i++) {
+    int pre = lookup_hash(inode, map->m_lblk + i, &newblock);
+    if (!pre) {
+      goto create;
+    }
+    --len;
   }
+  return ret;
 
+create:
   if (create) {
     mlfs_fsblk_t blockp;
     struct super_block *sb = get_inode_sb(handle->dev, inode);
@@ -101,7 +106,7 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
       a_type = DATA;
 
     ret = mlfs_new_blocks(get_inode_sb(handle->dev, inode), &blockp,
-        map->m_len, 0, 0, a_type, goal);
+        len, 0, 0, a_type, goal);
 
     if (ret > 0) {
       bitmap_bits_set_range(get_inode_sb(handle->dev, inode)->s_blk_bitmap,
@@ -116,8 +121,8 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 
     map->m_pblk = blockp;
 
-    mlfs_lblk_t lb = map->m_lblk;
-    for (uint32_t i = 0; i < map->m_len; ++i) {
+    mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
+    for (uint32_t i = 0; i < len; ++i) {
       int success = insert_hash(inode, lb, blockp);
 
       if (!success) fprintf(stderr, "could not insert\n");

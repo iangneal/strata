@@ -18,6 +18,13 @@ your test. I recommend to use more than 8 GB at least).
 ### Building Strata ###
 Assume current directory is a project root directory.
 
+Make sure to initialize the repository and sub-repositories first:
+```
+    git clone https://github.com/ut-osa/strata.git
+    git submodule init
+    git submodule update
+```
+
 ##### 1. Change memory configuration
 ~~~
 ./utils/change_dev_size.py [dax0.0] [SSD] [HDD] [dax1.0]
@@ -231,7 +238,7 @@ Here are some common issues and how we were able to resolve them.
 
 ### Future Documentation ###
 
-For documentation on current work or for more detailed documentation 
+For documentation on current work or for more detailed documentation
 about a particular feature, please check the [docs][docs] directory.
 
 Available topics:

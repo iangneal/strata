@@ -1,5 +1,7 @@
 #include <iostream>
+#include <string>
 #include <list>
+#include <random>
 #include "time_stat.h"
 
 #include <libcuckoo/city_hasher.hh>
@@ -40,7 +42,7 @@ int main(void)
 	struct time_stats stats;
 	std::random_device rd;
 	std::mt19937 mt(rd());
-	std::uniform_int_distribution<uint64_t> dist(0, N_KEYS);
+	std::uniform_int_distribution<uint64_t> dist(1, N_KEYS);
 	std::list<uint64_t> key_list;
 
 	for (uint64_t i = 0 ; i < N_KEYS/4; i++) {
@@ -113,10 +115,9 @@ int main(void)
 	time_stats_start(&stats);
 
 	for (uint64_t i = 0; i < N_KEYS; i++) {
-    uint64_t* val = (uint64_t*)malloc(sizeof(*val));
-    *val = i*2;
+    uint64_t val = i*2;
     struct cuckoo_hash_item* res =
-      cuckoo_hash_insert(&ch_table, &i, sizeof(i), val);
+      cuckoo_hash_insert(&ch_table, i, val);
     if (res == CUCKOO_HASH_FAILED) {
       cerr << "Cannot insert into cuckoo hash table!" << endl;
       return -1;
@@ -125,13 +126,13 @@ int main(void)
 
 	for (uint64_t i = 0; i < N_KEYS; i++) {
 		struct cuckoo_hash_item* res =
-      cuckoo_hash_lookup(&ch_table, &i, sizeof(i));
+      cuckoo_hash_lookup(&ch_table, i);
 
     if (!res) {
       cerr << "Key does not exist! " << i << endl;
       return -1;
     }
-    uint64_t j = *(uint64_t*)res->value;
+    uint64_t j = res->value;
 		if (j != (i*2)) {
 			cout << "CUCKOO hash: value is wrong ";
 			cout << i << " " << j << endl;
@@ -180,28 +181,32 @@ int main(void)
 
 	//////// Glib hashing
 #if 1
-	GHashTable *_int64_hash;
+	GHashTable *direct_hash;
 
-	_int64_hash = g_hash_table_new(g_int64_hash, g_int64_equal);
+	direct_hash = g_hash_table_new(g_direct_hash, g_direct_equal);
 
 	time_stats_reinit(&stats, 1);
 	time_stats_start(&stats);
 
 #ifdef SEQ
-	for (uint64_t i = 0; i < N_KEYS; i++) {
-		uint64_t* j = (uint64_t *)malloc(sizeof(uint64_t));
-		*j = (i * 2);
+  // Don't insert a key 0.
+	for (uint64_t i = 1; i <= N_KEYS; i++) {
+		uint64_t j = (i * 2);
 
-		g_hash_table_insert(_int64_hash, &i, j);
+		g_hash_table_insert(direct_hash, GUINT_TO_POINTER(i), GUINT_TO_POINTER(j));
 	}
 
-	for (uint64_t i = 0; i < N_KEYS; i++) {
-		//j = static_cast<uint64_t *>(g_hash_table_lookup(_int64_hash, &i));
-		uint64_t* j = (uint64_t *)g_hash_table_lookup(_int64_hash, &i);
+	for (uint64_t i = 1; i <= N_KEYS; i++) {
+    gpointer val = g_hash_table_lookup(direct_hash, GUINT_TO_POINTER(i));
+    if (!val) {
+      cerr << "Glib hash: could not find key " << i << endl;
+    }
 
-		if (*j != (i*2)) {
+		uint64_t j = GPOINTER_TO_UINT(val);
+
+		if (j != (i*2)) {
 			cout << "Glib hash: value is wrong ";
-			cout << i << " " << *j << endl;
+			cout << i << " " << j << endl;
 		}
 	}
 
@@ -213,18 +218,24 @@ int main(void)
 	time_stats_reinit(&stats, 1);
 	time_stats_start(&stats);
 
-	for (auto it: key_list) {
-		uint64_t* j = (uint64_t *)malloc(sizeof(uint64_t));
-		*j = it * 2;
-		g_hash_table_insert(_int64_hash, &it, j);
+	for (const uint64_t& it : key_list) {
+		uint64_t j = it * 2;
+		g_hash_table_insert(direct_hash, GUINT_TO_POINTER(it),
+                                     GUINT_TO_POINTER(j));
 	}
 
-	for (auto it: key_list) {
-		uint64_t* j = (uint64_t *)g_hash_table_lookup(_int64_hash, &it);
+	for (const uint64_t& it : key_list) {
+		gpointer val = g_hash_table_lookup(direct_hash, GUINT_TO_POINTER(it));
 
-		if (*j != (it*2)) {
+    if (!val) {
+      cerr << "Glib hash: could not find key " << i << endl;
+    }
+
+		uint64_t j = GPOINTER_TO_UINT(val);
+
+		if (j != (it*2)) {
 			cout << "Glib hash: value is wrong ";
-			cout << it << " " << *j << endl;
+			cout << it << " " << j << endl;
 		}
 	}
 
