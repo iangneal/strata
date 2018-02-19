@@ -38,7 +38,7 @@ THM_DEFINE(s1_map, s1, entry, key);
 #define KEY_POW 20
 #define N_KEYS (2 << KEY_POW)
 #define SEQ
-//#undef SEQ
+#undef SEQ
 
 int main(void)
 {
@@ -54,7 +54,7 @@ int main(void)
   std::random_device rd;
   std::mt19937 mt(rd());
   std::uniform_int_distribution<uint64_t> dist(1, N_KEYS);
-  std::list<uint64_t> key_list;
+  std::vector<uint64_t> key_list;
 
   for (uint64_t i = 0 ; i < N_KEYS/4; i++) {
     key_list.push_back(dist(mt));
@@ -83,9 +83,9 @@ int main(void)
   time_stats_reinit(&stats, 1);
   time_stats_start(&stats);
 
+  bool resized = false;
 #ifdef SEQ
   // Don't insert a key 0.
-  bool resized = false;
   for (uint32_t i = 1; i <= N_KEYS; i++) {
     struct s1 *entry = (struct s1*)malloc(sizeof(*entry));
     entry->key = i;
@@ -123,7 +123,7 @@ int main(void)
     uint64_t j = entry->value;
 
     if (j != (i*2)) {
-      cout << "Glib hash: value is wrong ";
+      cout << "HMT: value is wrong ";
       cout << i << " " << j << endl;
     }
   }
@@ -136,30 +136,53 @@ int main(void)
   time_stats_reinit(&stats, 1);
   time_stats_start(&stats);
 
-  for (const uint64_t& it : key_list) {
-    uint64_t j = it * 2;
-    g_hash_table_insert(direct_hash, GUINT_TO_POINTER(it),
-                                     GUINT_TO_POINTER(j));
+  for (int i = 0; i < key_list.size(); ++i) {
+    struct s1 *entry = (struct s1*)malloc(sizeof(*entry));
+    entry->key = key_list[i];
+    entry->value = entry->key * 2;
+
+    bucket = THM_INSERT(s1_map, &head, entry);
+    if (!bucket && !resized) {
+      thm_pool_new_block(&pool);
+      i--;
+      resized = true;
+      continue;
+    } else if (!bucket) {
+      cerr << "HMT: could not insert key " << i << endl;
+      break;
+    }
+    resized = false;
   }
 
-  for (const uint64_t& it : key_list) {
-    gpointer val = g_hash_table_lookup(direct_hash, GUINT_TO_POINTER(it));
-
-    if (!val) {
-      cerr << "Glib hash: could not find key " << i << endl;
+  for (int i = 0; i < key_list.size(); ++i) {
+    bucket = THM_FIND(s1_map, &head, key_list[i], NULL);
+    if (!bucket) {
+      cerr << "HMT: could not find key " << i << endl;
+      break;
     }
 
-    uint64_t j = GPOINTER_TO_UINT(val);
+    struct s1 *entry = THM_BUCKET_FIRST(s1_map, bucket);
 
-    if (j != (it*2)) {
-      cout << "Glib hash: value is wrong ";
-      cout << it << " " << j << endl;
+    while (entry && entry->key != key_list[i]) {
+      entry = THM_BUCKET_NEXT(s1_map, entry);
+    }
+
+    if (!entry) {
+      cerr << "HMT: could not find key " << key_list[i] << endl;
+      break;
+    }
+
+    uint64_t j = entry->value;
+
+    if (j != (key_list[i]*2)) {
+      cout << "HMT: value is wrong ";
+      cout << key_list[i] << " " << j << endl;
     }
   }
 
   time_stats_stop(&stats);
 
-  time_stats_print(&stats, (char *)"GLIB HASH (RAND) ---------------");
+  time_stats_print(&stats, (char *)"HASH MAPPED TRIE (RAND) ---------------");
 #endif
 #endif
 
@@ -250,10 +273,9 @@ int main(void)
   time_stats_start(&stats);
 
   for (auto it: key_list) {
-    uint64_t* val = (uint64_t*)malloc(sizeof(*val));
-    *val = it*2;
+    uint64_t val = it*2;
     struct cuckoo_hash_item* res =
-      cuckoo_hash_insert(&ch_table, &it, sizeof(it), val);
+      cuckoo_hash_insert(&ch_table, it, val);
     if (res == CUCKOO_HASH_FAILED) {
       cerr << "Cannot insert into cuckoo hash table!" << endl;
       return -1;
@@ -262,13 +284,13 @@ int main(void)
 
   for (auto it: key_list) {
     struct cuckoo_hash_item* res =
-      cuckoo_hash_lookup(&ch_table, &it, sizeof(it));
+      cuckoo_hash_lookup(&ch_table, it);
 
     if (!res) {
       cerr << "Key does not exist! " << it << endl;
       return -1;
     }
-    uint64_t j = *(uint64_t*)res->value;
+    uint64_t j = res->value;
     if (j != (it*2)) {
       cout << "CUCKOO hash: value is wrong ";
       cout << it << " " << j << endl;
@@ -330,7 +352,7 @@ int main(void)
     gpointer val = g_hash_table_lookup(direct_hash, GUINT_TO_POINTER(it));
 
     if (!val) {
-      cerr << "Glib hash: could not find key " << i << endl;
+      cerr << "Glib hash: could not find key " << it << endl;
     }
 
     uint64_t j = GPOINTER_TO_UINT(val);
