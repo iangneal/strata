@@ -1,0 +1,369 @@
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24198][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24198][read_superblock():2103] dev 1: # of segment 1
+[24198][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: sequential, Lookup: sequential
+Mem used (kB): 0
+** Total used block 103134
+truncate all allocated blocks
+** Total used block 3166
+INSERT TIME (total)
+	avg: 1.210 msec (1210.00 usec)
+	min: 1.210 msec (1210.00 usec)
+	max: 1.210 msec (1210.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 1.210 msec (1210.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+INSERT TIME (per insert [6250] )
+	avg: 0.000 msec (0.17 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.014 msec (14.00 usec)
+	std: 0.000 msec (0.41 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.014 msec (14.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (total)
+	avg: 0.581 msec (581.00 usec)
+	min: 0.581 msec (581.00 usec)
+	max: 0.581 msec (581.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 0.581 msec (581.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (per lookup [6250] )
+	avg: 0.000 msec (0.06 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.002 msec (2.00 usec)
+	std: 0.000 msec (0.24 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.002 msec (2.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24200][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24200][read_superblock():2103] dev 1: # of segment 1
+[24200][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: sequential, Lookup: reverse
+Mem used (kB): 0
+** Total used block 103134
+truncate all allocated blocks
+** Total used block 3166
+INSERT TIME (total)
+	avg: 1.257 msec (1257.00 usec)
+	min: 1.257 msec (1257.00 usec)
+	max: 1.257 msec (1257.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 1.257 msec (1257.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+INSERT TIME (per insert [6250] )
+	avg: 0.000 msec (0.17 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.013 msec (13.00 usec)
+	std: 0.000 msec (0.41 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.013 msec (13.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (total)
+	avg: 0.570 msec (570.00 usec)
+	min: 0.570 msec (570.00 usec)
+	max: 0.570 msec (570.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 0.570 msec (570.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (per lookup [6250] )
+	avg: 0.000 msec (0.08 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.001 msec (1.00 usec)
+	std: 0.000 msec (0.27 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.001 msec (1.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24202][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24202][read_superblock():2103] dev 1: # of segment 1
+[24202][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: sequential, Lookup: random
+Mem used (kB): 0
+** Total used block 103134
+truncate all allocated blocks
+** Total used block 3166
+INSERT TIME (total)
+	avg: 1.224 msec (1224.00 usec)
+	min: 1.224 msec (1224.00 usec)
+	max: 1.224 msec (1224.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 1.224 msec (1224.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+INSERT TIME (per insert [6250] )
+	avg: 0.000 msec (0.17 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.013 msec (13.00 usec)
+	std: 0.000 msec (0.41 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.013 msec (13.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (total)
+	avg: 0.580 msec (580.00 usec)
+	min: 0.580 msec (580.00 usec)
+	max: 0.580 msec (580.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 0.580 msec (580.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (per lookup [6250] )
+	avg: 0.000 msec (0.08 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.010 msec (10.00 usec)
+	std: 0.000 msec (0.29 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.010 msec (10.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24205][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24205][read_superblock():2103] dev 1: # of segment 1
+[24205][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: reverse, Lookup: sequential
+Mem used (kB): 0
+** Total used block 103154
+truncate all allocated blocks
+** Total used block 3167
+INSERT TIME (total)
+	avg: 2.770 msec (2770.00 usec)
+	min: 2.770 msec (2770.00 usec)
+	max: 2.770 msec (2770.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 2.770 msec (2770.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+INSERT TIME (per insert [6250] )
+	avg: 0.000 msec (0.42 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.014 msec (14.00 usec)
+	std: 0.001 msec (0.53 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.002 msec (2.00 usec)
+	99.99 percentile : 0.014 msec (14.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (total)
+	avg: 9.384 msec (9384.00 usec)
+	min: 9.384 msec (9384.00 usec)
+	max: 9.384 msec (9384.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 9.384 msec (9384.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (per lookup [6250] )
+	avg: 0.001 msec (1.47 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.098 msec (98.00 usec)
+	std: 0.001 msec (1.33 usec)
+	99 percentile    : 0.002 msec (2.00 usec)
+	99.9 percentile  : 0.002 msec (2.00 usec)
+	99.99 percentile : 0.098 msec (98.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24207][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24207][read_superblock():2103] dev 1: # of segment 1
+[24207][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: reverse, Lookup: reverse
+Mem used (kB): 0
+** Total used block 103154
+truncate all allocated blocks
+** Total used block 3167
+INSERT TIME (total)
+	avg: 2.794 msec (2794.00 usec)
+	min: 2.794 msec (2794.00 usec)
+	max: 2.794 msec (2794.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 2.794 msec (2794.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+INSERT TIME (per insert [6250] )
+	avg: 0.000 msec (0.42 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.014 msec (14.00 usec)
+	std: 0.001 msec (0.55 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.002 msec (2.00 usec)
+	99.99 percentile : 0.014 msec (14.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (total)
+	avg: 1.753 msec (1753.00 usec)
+	min: 1.753 msec (1753.00 usec)
+	max: 1.753 msec (1753.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 1.753 msec (1753.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (per lookup [6250] )
+	avg: 0.000 msec (0.25 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.002 msec (2.00 usec)
+	std: 0.000 msec (0.44 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.001 msec (1.00 usec)
+	99.99 percentile : 0.002 msec (2.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24209][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24209][read_superblock():2103] dev 1: # of segment 1
+[24209][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: reverse, Lookup: random
+Mem used (kB): 0
+** Total used block 69513
+truncate all allocated blocks
+** Total used block 3167
+INSERT TIME (total)
+	avg: 2.815 msec (2815.00 usec)
+	min: 2.815 msec (2815.00 usec)
+	max: 2.815 msec (2815.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 2.815 msec (2815.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+INSERT TIME (per insert [6250] )
+	avg: 0.000 msec (0.42 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.014 msec (14.00 usec)
+	std: 0.001 msec (0.56 usec)
+	99 percentile    : 0.001 msec (1.00 usec)
+	99.9 percentile  : 0.002 msec (2.00 usec)
+	99.99 percentile : 0.014 msec (14.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (total)
+	avg: 11.390 msec (11390.00 usec)
+	min: 11.390 msec (11390.00 usec)
+	max: 11.390 msec (11390.00 usec)
+	std: 0.000 msec (0.00 usec)
+	99 percentile    : 11.390 msec (11390.00 usec)
+	99.9 percentile  : 0.000 msec (0.00 usec)
+	99.99 percentile : 0.000 msec (0.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+LOOKUP TIME (per lookup [6250] )
+	avg: 0.002 msec (1.79 usec)
+	min: 0.001 msec (1.00 usec)
+	max: 0.095 msec (95.00 usec)
+	std: 0.002 msec (1.69 usec)
+	99 percentile    : 0.003 msec (3.00 usec)
+	99.9 percentile  : 0.008 msec (8.00 usec)
+	99.99 percentile : 0.095 msec (95.00 usec)
+	99.999 percentile: 0.000 msec (0.00 usec)
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24212][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24212][read_superblock():2103] dev 1: # of segment 1
+[24212][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: random, Lookup: sequential
+request nr_block 16 received nr_block 15
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24214][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24214][read_superblock():2103] dev 1: # of segment 1
+[24214][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: random, Lookup: reverse
+request nr_block 16 received nr_block 9
+Start init
+dev-dax engine is initialized: dev_path /dev/dax0.0 size 474 MB
+dev-dax engine is initialized: dev_path /dev/dax1.0 size 474 MB
+Devices initialized.
+shm mmap base 0x7ff000000000
+[24216][read_superblock():2088] superblock: size 121344 nblocks 118212 ninodes 50000
+[inode start 2 bmap start 3128 datablock start 3132 log start 121344]
+[24216][read_superblock():2103] dev 1: # of segment 1
+[24216][balloc_init():345] [dev 1] used blocks 3134
+Begin init
+inode allocated
+header allocated
+Init finished.
+Insert: random, Lookup: random
+request nr_block 16 received nr_block 12

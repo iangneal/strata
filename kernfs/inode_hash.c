@@ -3,10 +3,52 @@
 #include <stdbool.h>
 #include "inode_hash.h"
 
+#if USE_GLIB_HASH
+#include <glib.h>
+#include <glib/glib.h>
+
+// (iangneal): glib declares this structure within the ghash.c file, so I can't
+// reference the internal members at compile time. These fields are supposed to
+// be private, but I rather do this than directly hack the glib source code.
+struct _GHashTable {
+  gint             size;
+  gint             mod;
+  guint            mask;
+  gint             nnodes;
+  gint             noccupied;  /* nnodes + tombstones */
+
+  gpointer        *keys;
+  guint           *hashes;
+  gpointer        *values;
+
+  GHashFunc        hash_func;
+  GEqualFunc       key_equal_func;
+  gint             ref_count;
+  GDestroyNotify   key_destroy_func;
+  GDestroyNotify   value_destroy_func;
+};
+
+
+struct dhashtable_meta {
+  // Metadata for the in-memory state.
+  gint size;
+  gint mode;
+  guint mask;
+  gint nnodes;
+  gint noccupied;
+  // Metadata about the on-disk state.
+  mlfs_fsblk_t nblocks_keys;
+  mlfs_fsblk_t nblocks_hashes;
+  mlfs_fsblk_t nblocks_values;
+};
+#endif
+
 
 void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
 #if USE_GLIB_HASH
+  //printf("SIZE OF HASH_VALUE_T: %lu\n", sizeof(hash_value_t));
+  //printf("SIZE OF MLFS_FSBLK_T: %lu\n", sizeof(mlfs_fsblk_t));
   inode->htable = g_hash_table_new(g_direct_hash, g_direct_equal);
   bool success = inode->htable != NULL;
 #elif USE_CUCKOO_HASH
@@ -27,6 +69,8 @@ int insert_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t value) {
   gboolean exists = g_hash_table_insert(inode->htable,
                                         GUINT_TO_POINTER(key),
                                         GUINT_TO_POINTER(value));
+  // if not exists, then the value was not already in the table, therefore
+  // success.
   ret = exists;
 #elif USE_CUCKOO_HASH
   struct cuckoo_hash_item* out = cuckoo_hash_insert(inode->htable,
@@ -81,12 +125,26 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 
   // lookup all blocks.
   uint32_t len = map->m_len;
+  bool set = false;
+
   for (uint32_t i = 0; i < map->m_len; i++) {
-    int pre = lookup_hash(inode, map->m_lblk + i, &newblock);
+    hash_value_t value;
+    int pre = lookup_hash(inode, map->m_lblk + i, (mlfs_fsblk_t*)&value);
     if (!pre) {
       goto create;
     }
-    --len;
+
+    if (value.is_special) {
+      len -= MAX_CONTIGUOUS_BLOCKS - value.index;
+      i += MAX_CONTIGUOUS_BLOCKS - value.index - 1;
+      if (!set) {
+        map->m_pblk = value.addr + value.index;
+        set = true;
+      }
+    } else {
+      --len;
+    }
+
   }
   return ret;
 
@@ -105,31 +163,50 @@ create:
     else
       a_type = DATA;
 
-    ret = mlfs_new_blocks(get_inode_sb(handle->dev, inode), &blockp,
-        len, 0, 0, a_type, goal);
+    // break everything up into size of continuity blocks.
+    for (int c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
+      uint32_t nblocks_to_alloc = min(len - c, MAX_CONTIGUOUS_BLOCKS);
 
-    if (ret > 0) {
-      bitmap_bits_set_range(get_inode_sb(handle->dev, inode)->s_blk_bitmap,
-          blockp, ret);
-      get_inode_sb(handle->dev, inode)->used_blocks += ret;
-    } else if (ret == -ENOSPC) {
-      panic("Fail to allocate block\n");
-      try_migrate_blocks(g_root_dev, g_ssd_dev, 0, 1);
+      ret = mlfs_new_blocks(get_inode_sb(handle->dev, inode), &blockp,
+          nblocks_to_alloc, 0, 0, a_type, goal);
+
+      if (ret > 0) {
+        bitmap_bits_set_range(get_inode_sb(handle->dev, inode)->s_blk_bitmap,
+            blockp, ret);
+        get_inode_sb(handle->dev, inode)->used_blocks += ret;
+      } else if (ret == -ENOSPC) {
+        panic("Fail to allocate block\n");
+        try_migrate_blocks(g_root_dev, g_ssd_dev, 0, 1);
+      }
+
+      if (err) fprintf(stderr, "ERR = %d\n", err);
+
+      if (!set) {
+        map->m_pblk = blockp;
+        set = true;
+      }
+
+      mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
+      for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
+        hash_value_t in = {
+          .is_special = nblocks_to_alloc > 1,
+          .index = i,
+          .addr = blockp
+        };
+        int success = insert_hash(inode, lb + i, *((mlfs_fsblk_t*)&in));
+
+        if (!success) {
+          fprintf(stderr, "%d, %d, %d: %d\n", 1, CONTINUITY_BITS,
+              REMAINING_BITS, CHAR_BIT * sizeof(hash_value_t));
+          fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
+              lb + i, *((mlfs_fsblk_t*)&in));
+        }
+
+        //blockp++;
+        //lb++;
+      }
     }
 
-    if (err) fprintf(stderr, "ERR = %d\n", err);
-
-    map->m_pblk = blockp;
-
-    mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
-    for (uint32_t i = 0; i < len; ++i) {
-      int success = insert_hash(inode, lb, blockp);
-
-      if (!success) fprintf(stderr, "could not insert\n");
-
-      blockp++;
-      lb++;
-    }
   }
 
   return ret;
@@ -162,6 +239,32 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 #error "No mlfs_hash_truncate for this hash table!"
 #endif
   return 0;
+}
+
+double check_load_factor(struct inode *inode) {
+  double load = 0.0;
+#if USE_GLIB_HASH
+  GHashTable *hash = inode->htable;
+  double allocated_size = (double)hash->size;
+  double current_size = (double)hash->nnodes;
+  load = current_size / allocated_size;
+#else
+#warning "Load factor not enabled for this hash table configuration."
+#endif
+  return load;
+}
+
+int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
+  int ret = 0;
+#if USE_GLIB_HASH
+  GHashTable *hash = inode->htable;
+
+  // alloc a big range for keys.
+
+#else
+#warning "Unable to store hash table to device in this configuration!"
+#endif
+  return ret;
 }
 
 #endif

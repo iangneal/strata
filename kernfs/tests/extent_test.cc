@@ -14,6 +14,9 @@
 #include "../extents_bh.h"
 #include "../slru.h"
 #include "../migrate.h"
+#ifdef HASHTABLE
+#include "../inode_hash.h"
+#endif
 
 #include <sys/resource.h>
 #include <algorithm>
@@ -485,9 +488,6 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_init(&ls, lookup_order.size());
 
 
-  err = getrusage (RUSAGE_SELF, &before);
-  if (err) cerr << "ERR: getrusage" << endl;
-
   /* create all logical blocks */
   time_stats_start(&ts);
   for (mlfs_lblk_t lb : insert_order) {
@@ -514,10 +514,9 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   }
   time_stats_stop(&ts);
 
-  err = getrusage(RUSAGE_SELF, &after);
-  if (err) cerr << "ERR: getrusage" << endl;
-
-  cout << "Mem used (kB): " << (after.ru_maxrss - before.ru_maxrss) << endl;
+#ifdef HASHTABLE
+  cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
+#endif
 
   /* lookup */
   time_stats_start(&lookup);
