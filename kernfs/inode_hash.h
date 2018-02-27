@@ -20,12 +20,30 @@ extern "C" {
 #define MAX_CONTIGUOUS_BLOCKS (2 << 4)
 #define REMAINING_BITS ((CHAR_BIT * sizeof(mlfs_fsblk_t)) - CONTINUITY_BITS - 1)
 
-typedef struct {
-  mlfs_fsblk_t is_special : 1;
-  mlfs_fsblk_t index : CONTINUITY_BITS;
-  mlfs_fsblk_t addr : REMAINING_BITS;
-} hash_value_t;
+#define TO_64(hk) (*((uint64_t*)&hk))
 
+typedef mlfs_fsblk_t hash_value_t;
+
+#define SPECIAL(hv) !(!(hv & (1UL << 63UL)))
+#define INDEX(hv) ((hv >> REMAINING_BITS) & ((1lu << CONTINUITY_BITS) - 1lu))
+#define ADDR(hv) (((1lu << REMAINING_BITS) - 1lu) & hv)
+
+#define SBIT(cond) (cond ? (1UL << 63UL) : 0UL)
+#define IBITS(i) ((uint64_t)i << REMAINING_BITS)
+
+#define MAKEVAL(cond, idx, addr) (SBIT(cond) | IBITS(idx) | addr)
+
+#define GVAL2PTR(hv) (GUINT_TO_POINTER(hv))
+#define GPTR2VAL(pt) ((uint64_t)pt)
+
+
+#define MASK_32 ((1lu << 32) - 1)
+#define MAKEKEY(inode, key) (((uint64_t)inode->inum << 32) | key)
+#define GET_INUM(hk) (hk >> 32)
+#define GET_LBLK(hk) (hk & MASK_32)
+#define GKEY2PTR(hk) (GUINT_TO_POINTER(hk))
+#define GPTR2KEY(pt) ((uint64_t)pt)
+typedef uint64_t hash_key_t;
 
 /*
  * Generic hash table functions.
@@ -33,9 +51,9 @@ typedef struct {
 
 void init_hash(struct inode *inode);
 
-int insert_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t value);
+int insert_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t value);
 
-int lookup_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t* value);
+int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value);
 
 /*
  * Hash table metrics.

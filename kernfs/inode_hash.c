@@ -56,35 +56,34 @@ void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
   if (!ghash) {
     ghash = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (!ghash) {
+      panic("Failed to initialize inode hashtable\n");
+    }
   }
 
   inode->htable = ghash;
-
-  if (!ghash) {
-    panic("Failed to initialize inode hashtable\n");
-  }
 }
 
-int insert_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t value) {
+int insert_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t value) {
   int ret = 0;
+  hash_key_t k = MAKEKEY(inode, key);
   gboolean exists = g_hash_table_insert(inode->htable,
-                                        GUINT_TO_POINTER(key),
-                                        GUINT_TO_POINTER(value));
+                                        GKEY2PTR(k),
+                                        GVAL2PTR(value));
   // if not exists, then the value was not already in the table, therefore
   // success.
-  ret = exists;
-  return ret;
+  return (int)exists;
 }
 
 
-int lookup_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t* value) {
+int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value) {
   int ret = 0;
-  gpointer val = g_hash_table_lookup(inode->htable,
-                                     GUINT_TO_POINTER(key));
-  if (val) *value = GPOINTER_TO_UINT(val);
-  ret = val != NULL && *value > 0;
-  //printf("%p, %lu\n", val, *value);
-  return ret;
+  hash_key_t k = MAKEKEY(inode, key);
+  gpointer val = g_hash_table_lookup(inode->htable, GKEY2PTR(k));
+  if (val) {
+    *value = GPTR2VAL(val);
+  }
+  return val != NULL;
 }
 
 int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
@@ -109,16 +108,16 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 
   for (uint32_t i = 0; i < map->m_len; i++) {
     hash_value_t value;
-    int pre = lookup_hash(inode, map->m_lblk + i, (mlfs_fsblk_t*)&value);
+    int pre = lookup_hash(inode, map->m_lblk + i, &value);
     if (!pre) {
       goto create;
     }
 
-    if (value.is_special) {
-      len -= MAX_CONTIGUOUS_BLOCKS - value.index;
-      i += MAX_CONTIGUOUS_BLOCKS - value.index - 1;
+    if (SPECIAL(value)) {
+      len -= MAX_CONTIGUOUS_BLOCKS - INDEX(value);
+      i += MAX_CONTIGUOUS_BLOCKS - INDEX(value) - 1;
       if (!set) {
-        map->m_pblk = value.addr + value.index;
+        map->m_pblk = ADDR(value) + INDEX(value);
         set = true;
       }
     } else {
@@ -136,12 +135,13 @@ create:
     int retry_count = 0;
     enum alloc_type a_type;
 
-    if (flags & MLFS_GET_BLOCKS_CREATE_DATA_LOG)
+    if (flags & MLFS_GET_BLOCKS_CREATE_DATA_LOG) {
       a_type = DATA_LOG;
-    else if (flags & MLFS_GET_BLOCKS_CREATE_META)
+    } else if (flags & MLFS_GET_BLOCKS_CREATE_META) {
       a_type = TREE;
-    else
+    } else {
       a_type = DATA;
+    }
 
     // break everything up into size of continuity blocks.
     for (int c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
@@ -168,12 +168,8 @@ create:
 
       mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
       for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
-        hash_value_t in = {
-          .is_special = nblocks_to_alloc > 1,
-          .index = i,
-          .addr = blockp
-        };
-        int success = insert_hash(inode, lb + i, *((mlfs_fsblk_t*)&in));
+        hash_value_t in = MAKEVAL(nblocks_to_alloc > 1, i, blockp);
+        int success = insert_hash(inode, lb + i, in);
 
         if (!success) {
           fprintf(stderr, "%d, %d, %d: %d\n", 1, CONTINUITY_BITS,
