@@ -20,19 +20,42 @@ extern "C" {
 #define MAX_CONTIGUOUS_BLOCKS (2 << 4)
 #define REMAINING_BITS ((CHAR_BIT * sizeof(mlfs_fsblk_t)) - CONTINUITY_BITS - 1)
 
-typedef union hash_key {
+typedef union {
   struct {
     uint32_t inum; // inode number
     mlfs_lblk_t lblk; // logical block within specified inode
-  } data;
+  } entry;
   uint64_t raw;
 } hash_key_t;
 
-typedef struct {
-  mlfs_fsblk_t is_special : 1;
-  mlfs_fsblk_t index : CONTINUITY_BITS;
-  mlfs_fsblk_t addr : REMAINING_BITS;
+#define GKEY2PTR(hk) GUINT_TO_POINTER(hk.raw)
+#define GPTR2KEY(ptr) ((uint64_t)ptr)
+
+#if 0
+typedef union {
+  struct {
+    mlfs_fsblk_t is_special : 1;
+    mlfs_fsblk_t index : CONTINUITY_BITS;
+    mlfs_fsblk_t addr : REMAINING_BITS;
+  } encoding;
+  uint64_t raw;
 } hash_value_t;
+#define GVAL2PTR(hv) GUINT_TO_POINTER(hv.raw)
+#else
+typedef mlfs_fsblk_t hash_value_t;
+
+#define IS_SPECIAL(hv) !(!(hv & (1lu << 63lu)))
+#define INDEX(hv) ((hv >> REMAINING_BITS) & ((1lu << CONTINUITY_BITS) - 1lu))
+#define ADDR(hv) (((1lu << REMAINING_BITS) - 1lu) & hv)
+#define GVAL2PTR(hv) (GUINT_TO_POINTER(hv))
+#define GPTR2VAL(ptr) ((hash_value_t)ptr)
+
+#define MAKE_SPECIAL(sp) ((uint64_t) (sp & 1lu) << 63lu)
+#define MAKE_INDEX(idx) (((uint64_t) (idx & ((1 << CONTINUITY_BITS) - 1))) << REMAINING_BITS)
+#define MAKEVAL(sp, idx, addr) (MAKE_SPECIAL(sp) | MAKE_INDEX(idx) | addr)
+#endif
+
+extern int calls;
 
 /*
  * Generic hash table functions.
@@ -40,9 +63,9 @@ typedef struct {
 
 void init_hash(struct inode *inode);
 
-int insert_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t value);
+int insert_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t value);
 
-int lookup_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t* value);
+int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value);
 
 /*
  * Hash table metrics.

@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include "inode_hash.h"
 
-#if USE_GLIB_HASH
 #include <glib.h>
 #include <glib/glib.h>
 
@@ -48,114 +47,89 @@ struct dhashtable_meta {
   mlfs_fsblk_t nblocks_values;
 };
 
+
+#define MAKEKEY(inode, key) { .entry = {.inum = inode->inum, .lblk = key} }
+
 // (iangneal): Global hash table for all of NVRAM. Each inode has a point to
 // this one hash table just for abstraction of the inode interface.
 static GHashTable *ghash = NULL;
-#endif
 
 
 void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
-#if USE_GLIB_HASH
-  //printf("SIZE OF HASH_VALUE_T: %lu\n", sizeof(hash_value_t));
-  //printf("SIZE OF MLFS_FSBLK_T: %lu\n", sizeof(mlfs_fsblk_t));
+  printf("SIZE OF HASH_KEY_T: %lu\n", sizeof(hash_key_t));
+  printf("SIZE OF HASH_VALUE_T: %lu\n", sizeof(hash_value_t));
   if (!ghash) {
     ghash = g_hash_table_new(g_direct_hash, g_direct_equal);
   }
-  inode->htable = ghash;
-  bool success = inode->htable != NULL;
-#elif USE_CUCKOO_HASH
-  inode->htable = (struct cuckoo_hash*)mlfs_alloc(sizeof(inode->htable));
-  bool success = cuckoo_hash_init(inode->htable, 20);
-#else
-#error "Insert undefined for inode hashtable type!"
-#endif
 
-  if (!success) {
+  inode->htable = ghash;
+
+  if (!ghash) {
     panic("Failed to initialize inode hashtable\n");
   }
 }
 
-int insert_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t value) {
-  int ret = 0;
-#if USE_GLIB_HASH
+inline
+int insert_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t value) {
+  calls++;
+  hash_key_t k = MAKEKEY(inode, key);
+  //printf("insert_hash: %p -> %p\n", GKEY2PTR(k), GVAL2PTR(value));
   gboolean exists = g_hash_table_insert(inode->htable,
-                                        GUINT_TO_POINTER(key),
-                                        GUINT_TO_POINTER(value));
+                                        GKEY2PTR(k),
+                                        GVAL2PTR(value));
   // if not exists, then the value was not already in the table, therefore
   // success.
-  ret = exists;
-#elif USE_CUCKOO_HASH
-  struct cuckoo_hash_item* out = cuckoo_hash_insert(inode->htable,
-                                                    key,
-                                                    value);
-  if (out == CUCKOO_HASH_FAILED) {
-    panic("cuckoo_hash_insert: failed to insert.\n");
+  return (int)exists;
+}
+
+inline
+int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value) {
+  hash_key_t k = MAKEKEY(inode, key);
+  gpointer val = g_hash_table_lookup(inode->htable, GKEY2PTR(k));
+  if (val) {
+    //value->raw = GPOINTER_TO_UINT(val);
+    //*value = GPOINTER_TO_UINT(val);
+    *value = GPTR2VAL(val);
   }
-  // if is NULL, then value was not already in the table, therefore success.
-  ret = out == NULL;
-#else
-#error "Insert undefined for inode hashtable type!"
-#endif
-  return ret;
+  //printf("lookup_hash: %p -> %p (%lx)\n", GKEY2PTR(k), val, *value);
+
+  return val != NULL;
 }
 
-
-int lookup_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t* value) {
-  int ret = 0;
-#if USE_GLIB_HASH
-  gpointer val = g_hash_table_lookup(inode->htable,
-                                     GUINT_TO_POINTER(key));
-  if (val) *value = GPOINTER_TO_UINT(val);
-  ret = val != NULL && *value > 0;
-  //printf("%p, %lu\n", val, *value);
-#elif USE_CUCKOO_HASH
-  struct cuckoo_hash_item* out = cuckoo_hash_lookup(inode->htable,
-                                                    key);
-  if (out) *value = out->value;
-  ret = out != NULL;
-#else
-#error "Insert undefined for inode hashtable type!"
-#endif
-  return ret;
-}
+int calls = 0;
 
 int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 			struct mlfs_map_blocks *map, int flags) {
-	struct mlfs_ext_path *path = NULL;
-	struct mlfs_ext_path *_path = NULL;
-	struct mlfs_extent newex, *ex;
-	int goal, err = 0, depth;
-	mlfs_lblk_t allocated = 0;
-	mlfs_fsblk_t next, newblock;
-	int create;
-	uint64_t tsc_start = 0;
-
-	mlfs_assert(handle != NULL);
-
-	create = flags & MLFS_GET_BLOCKS_CREATE_DATA;
+	int err = 0;
+	int create = flags & MLFS_GET_BLOCKS_CREATE_DATA;
   int ret = map->m_len;
-
-  // lookup all blocks.
   uint32_t len = map->m_len;
   bool set = false;
 
-  for (uint32_t i = 0; i < map->m_len; i++) {
+	mlfs_assert(handle);
+
+  // lookup all blocks.
+  for (mlfs_lblk_t i = 0; i < map->m_len;) {
     hash_value_t value;
-    int pre = lookup_hash(inode, map->m_lblk + i, (mlfs_fsblk_t*)&value);
+    int pre = lookup_hash(inode, map->m_lblk + i, &value);
     if (!pre) {
       goto create;
     }
 
-    if (value.is_special) {
-      len -= MAX_CONTIGUOUS_BLOCKS - value.index;
-      i += MAX_CONTIGUOUS_BLOCKS - value.index - 1;
+    if (IS_SPECIAL(value)) {
+      //printf("LOOKUP: %lx (%d, %d, %lu)\n", value, IS_SPECIAL(value),
+      //       INDEX(value), ADDR(value));
+      len -= MAX_CONTIGUOUS_BLOCKS - INDEX(value);
+      i += MAX_CONTIGUOUS_BLOCKS - INDEX(value);
       if (!set) {
-        map->m_pblk = value.addr + value.index;
+        map->m_pblk = ADDR(value) + INDEX(value);
         set = true;
       }
     } else {
+      //printf("LOOKUP: not special %lx\n", value);
       --len;
+      ++i;
     }
 
   }
@@ -163,36 +137,31 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 
 create:
   if (create) {
-    mlfs_fsblk_t blockp;
     struct super_block *sb = get_inode_sb(handle->dev, inode);
-    int ret;
-    int retry_count = 0;
     enum alloc_type a_type;
 
-    if (flags & MLFS_GET_BLOCKS_CREATE_DATA_LOG)
+    if (flags & MLFS_GET_BLOCKS_CREATE_DATA_LOG) {
       a_type = DATA_LOG;
-    else if (flags & MLFS_GET_BLOCKS_CREATE_META)
+    } else if (flags & MLFS_GET_BLOCKS_CREATE_META) {
       a_type = TREE;
-    else
+    } else {
       a_type = DATA;
+    }
 
     // break everything up into size of continuity blocks.
-    for (int c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
-      uint32_t nblocks_to_alloc = min(len - c, MAX_CONTIGUOUS_BLOCKS);
+    for (mlfs_lblk_t c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
+      mlfs_fsblk_t blockp;
+      mlfs_lblk_t nblocks_to_alloc = min(len - c, MAX_CONTIGUOUS_BLOCKS);
 
-      ret = mlfs_new_blocks(get_inode_sb(handle->dev, inode), &blockp,
-          nblocks_to_alloc, 0, 0, a_type, goal);
+      int r = mlfs_new_blocks(sb, &blockp, nblocks_to_alloc, 0, 0, a_type, 0);
 
-      if (ret > 0) {
-        bitmap_bits_set_range(get_inode_sb(handle->dev, inode)->s_blk_bitmap,
-            blockp, ret);
-        get_inode_sb(handle->dev, inode)->used_blocks += ret;
-      } else if (ret == -ENOSPC) {
+      if (r > 0) {
+        bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
+        sb->used_blocks += r;
+      } else if (r == -ENOSPC) {
         panic("Fail to allocate block\n");
         try_migrate_blocks(g_root_dev, g_ssd_dev, 0, 1);
       }
-
-      if (err) fprintf(stderr, "ERR = %d\n", err);
 
       if (!set) {
         map->m_pblk = blockp;
@@ -200,23 +169,18 @@ create:
       }
 
       mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
-      for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
-        hash_value_t in = {
-          .is_special = nblocks_to_alloc > 1,
-          .index = i,
-          .addr = blockp
-        };
-        int success = insert_hash(inode, lb + i, *((mlfs_fsblk_t*)&in));
+      for (mlfs_lblk_t i = 0; i < nblocks_to_alloc; ++i) {
+        hash_value_t in = MAKEVAL(nblocks_to_alloc > 1, i, blockp);
+        //printf("INSERT: %lx (%d, %d, %lu)\n", in, IS_SPECIAL(in),
+        //       INDEX(in), ADDR(in));
 
-        if (!success) {
+        if (!insert_hash(inode, lb + i, in)) {
           fprintf(stderr, "%d, %d, %lu: %lu\n", 1, CONTINUITY_BITS,
               REMAINING_BITS, CHAR_BIT * sizeof(hash_value_t));
           fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
               lb + i, *((mlfs_fsblk_t*)&in));
         }
 
-        //blockp++;
-        //lb++;
       }
     }
 
@@ -226,50 +190,44 @@ create:
 }
 int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 		mlfs_lblk_t start, mlfs_lblk_t end) {
-#if USE_GLIB_HASH
   GHashTableIter iter;
+  hash_key_t k;
+  hash_value_t v;
+  mlfs_fsblk_t fblk;
   gpointer key, value;
 
   g_hash_table_iter_init (&iter, inode->htable);
   while (g_hash_table_iter_next (&iter, &key, &value)) {
-    mlfs_lblk_t lb = GPOINTER_TO_UINT(key);
-    mlfs_fsblk_t pb = GPOINTER_TO_UINT(value);
-    if (lb >= start && lb <= end) {
-      mlfs_free_blocks(handle, inode, NULL, lb, 1, 0);
+    k.raw = GPOINTER_TO_UINT(key);
+    //v.raw = GPOINTER_TO_UINT(value);
+    v = GPTR2VAL(value);
+
+    if (k.entry.inum == inode->inum && k.entry.lblk >= start &&
+        k.entry.lblk <= end) {
+      if (IS_SPECIAL(v)) {
+        fblk = ADDR(v) + INDEX(v);
+      } else {
+        fblk = v;
+      }
+      //fprintf(stderr, "Truncate: %lu = (%lu + %lu)\n", fblk, ADDR(v), INDEX(v));
+      mlfs_free_blocks(handle, inode, NULL, fblk, 1, 0);
       g_hash_table_iter_remove(&iter);
     }
   }
-#elif USE_CUCKOO_HASH
-  for (struct cuckoo_hash_item *cuckoo_hash_each(iter, inode->htable)) {
-    mlfs_lblk_t lb = iter->key;
-    mlfs_fsblk_t pb = iter->value;
-    if (lb >= start && lb <= end) {
-      mlfs_free_blocks(handle, inode, NULL, lb, 1, 0);
-      cuckoo_hash_remove(inode->htable, iter);
-    }
-  }
-#else
-#error "No mlfs_hash_truncate for this hash table!"
-#endif
+
   return 0;
 }
 
 double check_load_factor(struct inode *inode) {
   double load = 0.0;
-#if USE_GLIB_HASH
   GHashTable *hash = inode->htable;
   double allocated_size = (double)hash->size;
   double current_size = (double)hash->nnodes;
-  load = current_size / allocated_size;
-#else
-#warning "Load factor not enabled for this hash table configuration."
-#endif
-  return load;
+  return current_size / allocated_size;
 }
 
 int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
   int ret = 0;
-#if USE_GLIB_HASH
   struct buffer_head *bh;
   GHashTable *hash = inode->htable;
 
@@ -316,9 +274,6 @@ int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
 
   // TODO: do rest of hash table.
 
-#else
-#warning "Unable to store hash table to device in this configuration!"
-#endif
   return ret;
 }
 

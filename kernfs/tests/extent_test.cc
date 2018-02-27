@@ -407,12 +407,13 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       exit(-1);
     }
 
-    //fprintf(stdout, "INSERT [%d/%d] offset %u, block: %lx len %u\n",
-    //    from, to, from, map.m_pblk, map.m_len);
+    //fprintf(stdout, "INSERT logical %u, physical: %lx len %u\n",
+    //    lb, map.m_pblk, map.m_len);
   }
   time_stats_stop(&ts);
 
 #ifdef HASHTABLE
+  cout << "Calls to get: " << calls << endl;
   cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
   cout << "Persisting hash table..." << endl;
   assert(!mlfs_hash_persist(&handle, inode));
@@ -436,8 +437,8 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       exit(-1);
     }
 
-    //fprintf(stdout, "LOOKUP [%u], block: %x -> %lx len %u\n",
-    //    lb, map.m_lblk, map.m_pblk, map.m_len);
+    //fprintf(stdout, "LOOKUP logical %u, physical: %lx len %u\n",
+    //    lb, map.m_pblk, map.m_len);
   }
   time_stats_stop(&lookup);
 

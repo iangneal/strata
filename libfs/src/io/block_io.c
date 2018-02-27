@@ -309,7 +309,8 @@ int mlfs_write(struct buffer_head *b)
 	mlfs_assert(b->b_size > 0);
 
 	//mlfs_assert(b->b_blocknr + (b->b_size >> g_block_size_shift) <= disk_sb[b->b_dev].size);
-
+  //printf("mlfs_write: %p, %p, %u (dev: %d, block: %lu)\n",
+  //    b, b->b_data, b->b_size, b->b_dev, b->b_blocknr);
 	storage_engine = g_bdev[b->b_dev]->storage_engine;
 	if (b->b_offset)
 		ret = storage_engine->write_unaligned(b->b_dev, b->b_data,
