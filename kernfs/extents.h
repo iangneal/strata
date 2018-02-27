@@ -400,6 +400,10 @@ int mlfs_mark_inode_dirty(struct inode *inode);
 void mlfs_free_blocks(handle_t *handle, struct inode *inode,
 		void *fake, mlfs_fsblk_t block, int count, int flags);
 
+mlfs_fsblk_t mlfs_new_meta_blocks(handle_t *handle,
+		struct inode *inode, mlfs_fsblk_t goal, unsigned int flags,
+		mlfs_lblk_t *count, int *errp);
+
 #ifdef __cplusplus
 }
 #endif

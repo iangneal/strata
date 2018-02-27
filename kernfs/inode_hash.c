@@ -28,19 +28,29 @@ struct _GHashTable {
   GDestroyNotify   value_destroy_func;
 };
 
-
+// This is the hash table meta-data that is persisted to NVRAM, that we may read
+// it and know everything we need to know in order to reconstruct it in memory.
 struct dhashtable_meta {
   // Metadata for the in-memory state.
   gint size;
-  gint mode;
+  gint mod;
   guint mask;
   gint nnodes;
   gint noccupied;
   // Metadata about the on-disk state.
+  mlfs_fsblk_t keys_start;
   mlfs_fsblk_t nblocks_keys;
+
+  mlfs_fsblk_t hashes_start;
   mlfs_fsblk_t nblocks_hashes;
+
+  mlfs_fsblk_t values_start;
   mlfs_fsblk_t nblocks_values;
 };
+
+// (iangneal): Global hash table for all of NVRAM. Each inode has a point to
+// this one hash table just for abstraction of the inode interface.
+static GHashTable *ghash = NULL;
 #endif
 
 
@@ -49,7 +59,10 @@ void init_hash(struct inode *inode) {
 #if USE_GLIB_HASH
   //printf("SIZE OF HASH_VALUE_T: %lu\n", sizeof(hash_value_t));
   //printf("SIZE OF MLFS_FSBLK_T: %lu\n", sizeof(mlfs_fsblk_t));
-  inode->htable = g_hash_table_new(g_direct_hash, g_direct_equal);
+  if (!ghash) {
+    ghash = g_hash_table_new(g_direct_hash, g_direct_equal);
+  }
+  inode->htable = ghash;
   bool success = inode->htable != NULL;
 #elif USE_CUCKOO_HASH
   inode->htable = (struct cuckoo_hash*)mlfs_alloc(sizeof(inode->htable));
@@ -59,7 +72,7 @@ void init_hash(struct inode *inode) {
 #endif
 
   if (!success) {
-    panic("Failed to initialize cuckoo hashtable\n");
+    panic("Failed to initialize inode hashtable\n");
   }
 }
 
@@ -196,7 +209,7 @@ create:
         int success = insert_hash(inode, lb + i, *((mlfs_fsblk_t*)&in));
 
         if (!success) {
-          fprintf(stderr, "%d, %d, %d: %d\n", 1, CONTINUITY_BITS,
+          fprintf(stderr, "%d, %d, %lu: %lu\n", 1, CONTINUITY_BITS,
               REMAINING_BITS, CHAR_BIT * sizeof(hash_value_t));
           fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
               lb + i, *((mlfs_fsblk_t*)&in));
@@ -257,14 +270,60 @@ double check_load_factor(struct inode *inode) {
 int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
   int ret = 0;
 #if USE_GLIB_HASH
+  struct buffer_head *bh;
   GHashTable *hash = inode->htable;
 
-  // alloc a big range for keys.
+  // Set up the hash table metadata in
+  struct dhashtable_meta metadata = {
+    .size = hash->size,
+    .mod = hash->mod,
+    .mask = hash->mask,
+    .nnodes = hash->nnodes,
+    .noccupied = hash->noccupied
+  };
+
+  assert(inode->l1.addrs);
+  bool force = true;
+  if (!inode->l1.addrs[0] || force) {
+    // allocate a block for metadata
+    int err;
+    mlfs_lblk_t count = 1;
+    fprintf(stderr, "Preparing to allocate new meta blocks...\n");
+    inode->l1.addrs[0] = mlfs_new_meta_blocks(handle, inode, 0,
+        MLFS_GET_BLOCKS_CREATE, &count, &err);
+    if (err < 0) {
+      fprintf(stderr, "Error: could not allocate new meta block: %d\n", err);
+      return err;
+    }
+    assert(err == count);
+    printf("Allocated meta block #%lu\n", inode->l1.addrs[0]);
+  }
+  // Write metadata to disk.
+  bh = bh_get_sync_IO(handle->dev, inode->l1.addrs[0], BH_NO_DATA_ALLOC);
+  //bh = bh_get_sync_IO(handle->dev, 8, BH_NO_DATA_ALLOC);
+  assert(bh);
+
+  bh->b_data = (uint8_t*)&metadata;
+  bh->b_size = sizeof(metadata);
+  bh->b_offset = 0;
+
+  printf("DING: %p, size %u to %08lx\n", bh->b_data, bh->b_size,
+      inode->l1.addrs[0]);
+  ret = mlfs_write(bh);
+  assert(!ret);
+
+  bh_release(bh);
+
+  // TODO: do rest of hash table.
 
 #else
 #warning "Unable to store hash table to device in this configuration!"
 #endif
   return ret;
+}
+
+int mlfs_hash_construct_from_device(handle_t *handle, struct inode *inode) {
+  return 0;
 }
 
 #endif

@@ -57,8 +57,6 @@ class ExtentTest
 
   void run_read_block_test(uint32_t inum, mlfs_lblk_t from,
     mlfs_lblk_t to, uint32_t nr_block);
-  void run_multi_block_test(mlfs_lblk_t from, mlfs_lblk_t to,
-    uint32_t nr_block);
   void run_multi_block_test(list<mlfs_lblk_t> insert_order,
     list<mlfs_lblk_t> lookup_order, int nr_block = 1);
   void run_ftruncate_test(mlfs_lblk_t from, mlfs_lblk_t to,
@@ -334,106 +332,6 @@ void ExtentTest::run_read_block_test(uint32_t inum, mlfs_lblk_t from,
   }
 }
 
-void ExtentTest::run_multi_block_test(mlfs_lblk_t from,
-  mlfs_lblk_t to, uint32_t nr_block)
-{
-  int err;
-  struct buffer_head bh_got;
-  struct mlfs_map_blocks map;
-  struct time_stats ts;
-  struct time_stats lookup;
-  struct time_stats hs;
-  struct time_stats ls;
-  std::random_device rd;
-  std::mt19937 mt(rd());
-  std::unordered_set<uint64_t> merge_set;
-  mlfs_lblk_t start = from;
-
-  handle_t handle = {.dev = g_root_dev};
-  std::uniform_int_distribution<> dist(from, to);
-
-  int ntests = (to - from) / (nr_block * g_block_size_bytes);
-
-  // Create merge_set (set of unique, random, randomly ordered logical blocks)
-  while (merge_set.size() < ntests) {
-    merge_set.insert(dist(mt) >> g_block_size_shift);
-  }
-
-  time_stats_init(&ts, 1);
-  time_stats_init(&lookup, 1);
-  time_stats_init(&hs, ntests);
-  time_stats_init(&ls, ntests);
-
-  /* populate all logical blocks */
-  time_stats_start(&ts);
-  for (; from <= to; from += (nr_block * g_block_size_bytes)) {
-    map.m_lblk = (from >> g_block_size_shift);
-    map.m_len = nr_block;
-    time_stats_start(&hs);
-    err = mlfs_ext_get_blocks(&handle, inode, &map,
-      MLFS_GET_BLOCKS_CREATE);
-    time_stats_stop(&hs);
-    if (err < 0) {
-      fprintf(stderr, "err: %s, offset %x, block: %lx\n",
-        strerror(-err), from, map.m_pblk);
-    }
-
-    if (map.m_len != nr_block) {
-      cout << "request nr_block " << nr_block <<
-      " received nr_block " << map.m_len << endl;
-      //exit(-1);
-    }
-
-    //fprintf(stdout, "INSERT [%d/%d] offset %u, block: %lx len %u\n",
-    //    from, to, from, map.m_pblk, map.m_len);
-  }
-  time_stats_stop(&ts);
-
-  sync_all_buffers(g_bdev[g_root_dev]);
-
-  /* random lookup */
-  time_stats_start(&lookup);
-  for (uint64_t lblock : merge_set) {
-    map.m_lblk = lblock;
-    map.m_len = 1;
-    map.m_pblk = 0;
-    time_stats_start(&ls);
-    err = mlfs_ext_get_blocks(&handle, inode, &map, MLFS_GET_BLOCKS_CREATE);
-    time_stats_stop(&ls);
-
-    if (err < 0) {
-      fprintf(stderr, "err: %s, offset %x, block: %lx\n",
-        strerror(-err), from, map.m_pblk);
-    }
-
-    //fprintf(stdout, "LOOKUP [%lu/%lu] offset %u, block: %x -> %lx len %u\n",
-    //    lblock, (to - start) / g_block_size_bytes, start,
-    //    map.m_lblk, map.m_pblk, map.m_len);
-  }
-  time_stats_stop(&lookup);
-
-  printf("** Total used block %d\n",
-    bitmap_weight((uint64_t *)sb[g_root_dev]->s_blk_bitmap->bitmap,
-    sb[g_root_dev]->ondisk->ndatablocks));
-
-  cout << "truncate all allocated blocks" << endl;
-
-  mlfs_ext_truncate(&handle, inode, 0, to >> g_block_size_shift);
-
-  printf("** Total used block %d\n",
-    bitmap_weight((uint64_t *)sb[g_root_dev]->s_blk_bitmap->bitmap,
-    sb[g_root_dev]->ondisk->ndatablocks));
-
-  cout << "INSERT TIME (total)" << endl;
-  time_stats_print(&ts, NULL);
-  cout << "INSERT TIME (per insert [" << hs.n <<"] )" << endl;
-  time_stats_print(&hs, NULL);
-  cout << "LOOKUP TIME (total)" << endl;
-  time_stats_print(&lookup, NULL);
-  cout << "LOOKUP TIME (per lookup [" << ls.n <<"] )" << endl;
-  time_stats_print(&ls, NULL);
-}
-
 void ExtentTest::run_ftruncate_test(mlfs_lblk_t from,
   mlfs_lblk_t to, uint32_t nr_block)
 {
@@ -516,7 +414,11 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
 
 #ifdef HASHTABLE
   cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
+  cout << "Persisting hash table..." << endl;
+  assert(!mlfs_hash_persist(&handle, inode));
+  cout << "Hash table persisted." << endl;
 #endif
+  sync_all_buffers(g_bdev[g_root_dev]);
 
   /* lookup */
   time_stats_start(&lookup);

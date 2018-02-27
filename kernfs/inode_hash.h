@@ -20,6 +20,14 @@ extern "C" {
 #define MAX_CONTIGUOUS_BLOCKS (2 << 4)
 #define REMAINING_BITS ((CHAR_BIT * sizeof(mlfs_fsblk_t)) - CONTINUITY_BITS - 1)
 
+typedef union hash_key {
+  struct {
+    uint32_t inum; // inode number
+    mlfs_lblk_t lblk; // logical block within specified inode
+  } data;
+  uint64_t raw;
+} hash_key_t;
+
 typedef struct {
   mlfs_fsblk_t is_special : 1;
   mlfs_fsblk_t index : CONTINUITY_BITS;

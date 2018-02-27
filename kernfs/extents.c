@@ -225,7 +225,7 @@ static mlfs_fsblk_t mlfs_new_data_blocks(handle_t *handle,
 }
 
 /* used for internal node blocks in extent tree */
-static mlfs_fsblk_t mlfs_new_meta_blocks(handle_t *handle,
+mlfs_fsblk_t mlfs_new_meta_blocks(handle_t *handle,
 		struct inode *inode, mlfs_fsblk_t goal, unsigned int flags,
 		mlfs_lblk_t *count, int *errp)
 {
