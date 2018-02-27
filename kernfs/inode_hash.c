@@ -28,29 +28,40 @@ struct _GHashTable {
 };
 
 
+// This is the hash table meta-data that is persisted to NVRAM, that we may read
+// it and know everything we need to know in order to reconstruct it in memory.
 struct dhashtable_meta {
   // Metadata for the in-memory state.
   gint size;
-  gint mode;
+  gint mod;
   guint mask;
   gint nnodes;
   gint noccupied;
   // Metadata about the on-disk state.
+  mlfs_fsblk_t keys_start;
   mlfs_fsblk_t nblocks_keys;
+
+  mlfs_fsblk_t hashes_start;
   mlfs_fsblk_t nblocks_hashes;
+
+  mlfs_fsblk_t values_start;
   mlfs_fsblk_t nblocks_values;
 };
 
+// (iangneal): Global hash table for all of NVRAM. Each inode has a point to
+// this one hash table just for abstraction of the inode interface.
+static GHashTable *ghash = NULL;
 
 void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
-  //printf("SIZE OF HASH_VALUE_T: %lu\n", sizeof(hash_value_t));
-  //printf("SIZE OF MLFS_FSBLK_T: %lu\n", sizeof(mlfs_fsblk_t));
-  inode->htable = g_hash_table_new(g_direct_hash, g_direct_equal);
-  bool success = inode->htable != NULL;
+  if (!ghash) {
+    ghash = g_hash_table_new(g_direct_hash, g_direct_equal);
+  }
 
-  if (!success) {
-    panic("Failed to initialize cuckoo hashtable\n");
+  inode->htable = ghash;
+
+  if (!ghash) {
+    panic("Failed to initialize inode hashtable\n");
   }
 }
 
