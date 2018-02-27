@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include "inode_hash.h"
 
-#if USE_GLIB_HASH
 #include <glib.h>
 #include <glib/glib.h>
 
@@ -41,22 +40,14 @@ struct dhashtable_meta {
   mlfs_fsblk_t nblocks_hashes;
   mlfs_fsblk_t nblocks_values;
 };
-#endif
 
 
 void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
-#if USE_GLIB_HASH
   //printf("SIZE OF HASH_VALUE_T: %lu\n", sizeof(hash_value_t));
   //printf("SIZE OF MLFS_FSBLK_T: %lu\n", sizeof(mlfs_fsblk_t));
   inode->htable = g_hash_table_new(g_direct_hash, g_direct_equal);
   bool success = inode->htable != NULL;
-#elif USE_CUCKOO_HASH
-  inode->htable = (struct cuckoo_hash*)mlfs_alloc(sizeof(inode->htable));
-  bool success = cuckoo_hash_init(inode->htable, 20);
-#else
-#error "Insert undefined for inode hashtable type!"
-#endif
 
   if (!success) {
     panic("Failed to initialize cuckoo hashtable\n");
@@ -65,45 +56,23 @@ void init_hash(struct inode *inode) {
 
 int insert_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t value) {
   int ret = 0;
-#if USE_GLIB_HASH
   gboolean exists = g_hash_table_insert(inode->htable,
                                         GUINT_TO_POINTER(key),
                                         GUINT_TO_POINTER(value));
   // if not exists, then the value was not already in the table, therefore
   // success.
   ret = exists;
-#elif USE_CUCKOO_HASH
-  struct cuckoo_hash_item* out = cuckoo_hash_insert(inode->htable,
-                                                    key,
-                                                    value);
-  if (out == CUCKOO_HASH_FAILED) {
-    panic("cuckoo_hash_insert: failed to insert.\n");
-  }
-  // if is NULL, then value was not already in the table, therefore success.
-  ret = out == NULL;
-#else
-#error "Insert undefined for inode hashtable type!"
-#endif
   return ret;
 }
 
 
 int lookup_hash(struct inode *inode, mlfs_lblk_t key, mlfs_fsblk_t* value) {
   int ret = 0;
-#if USE_GLIB_HASH
   gpointer val = g_hash_table_lookup(inode->htable,
                                      GUINT_TO_POINTER(key));
   if (val) *value = GPOINTER_TO_UINT(val);
   ret = val != NULL && *value > 0;
   //printf("%p, %lu\n", val, *value);
-#elif USE_CUCKOO_HASH
-  struct cuckoo_hash_item* out = cuckoo_hash_lookup(inode->htable,
-                                                    key);
-  if (out) *value = out->value;
-  ret = out != NULL;
-#else
-#error "Insert undefined for inode hashtable type!"
-#endif
   return ret;
 }
 
@@ -213,7 +182,6 @@ create:
 }
 int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 		mlfs_lblk_t start, mlfs_lblk_t end) {
-#if USE_GLIB_HASH
   GHashTableIter iter;
   gpointer key, value;
 
@@ -226,44 +194,25 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
       g_hash_table_iter_remove(&iter);
     }
   }
-#elif USE_CUCKOO_HASH
-  for (struct cuckoo_hash_item *cuckoo_hash_each(iter, inode->htable)) {
-    mlfs_lblk_t lb = iter->key;
-    mlfs_fsblk_t pb = iter->value;
-    if (lb >= start && lb <= end) {
-      mlfs_free_blocks(handle, inode, NULL, lb, 1, 0);
-      cuckoo_hash_remove(inode->htable, iter);
-    }
-  }
-#else
-#error "No mlfs_hash_truncate for this hash table!"
-#endif
+
   return 0;
 }
 
 double check_load_factor(struct inode *inode) {
   double load = 0.0;
-#if USE_GLIB_HASH
   GHashTable *hash = inode->htable;
   double allocated_size = (double)hash->size;
   double current_size = (double)hash->nnodes;
   load = current_size / allocated_size;
-#else
-#warning "Load factor not enabled for this hash table configuration."
-#endif
   return load;
 }
 
 int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
   int ret = 0;
-#if USE_GLIB_HASH
   GHashTable *hash = inode->htable;
 
   // alloc a big range for keys.
 
-#else
-#warning "Unable to store hash table to device in this configuration!"
-#endif
   return ret;
 }
 
