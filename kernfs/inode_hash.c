@@ -3,6 +3,9 @@
 #include <stdbool.h>
 #include "inode_hash.h"
 
+#define CUSTOM
+
+#ifndef CUSTOM
 #include <glib.h>
 #include <glib/glib.h>
 
@@ -26,6 +29,12 @@ struct _GHashTable {
   GDestroyNotify   key_destroy_func;
   GDestroyNotify   value_destroy_func;
 };
+#else
+#include "ghash.h"
+
+#define GPOINTER_TO_UINT(x) ((uint64_t)x)
+#endif
+
 
 
 // This is the hash table meta-data that is persisted to NVRAM, that we may read
@@ -38,19 +47,16 @@ struct dhashtable_meta {
   gint nnodes;
   gint noccupied;
   // Metadata about the on-disk state.
+  size_t nblocks;
   mlfs_fsblk_t keys_start;
-  mlfs_fsblk_t nblocks_keys;
-
   mlfs_fsblk_t hashes_start;
-  mlfs_fsblk_t nblocks_hashes;
-
   mlfs_fsblk_t values_start;
-  mlfs_fsblk_t nblocks_values;
 };
 
 // (iangneal): Global hash table for all of NVRAM. Each inode has a point to
 // this one hash table just for abstraction of the inode interface.
 static GHashTable *ghash = NULL;
+static struct dhashtable_meta *ghash_meta;
 
 void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
@@ -88,16 +94,11 @@ int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value) {
 
 int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 			struct mlfs_map_blocks *map, int flags) {
-	struct mlfs_ext_path *path = NULL;
-	struct mlfs_ext_path *_path = NULL;
-	struct mlfs_extent newex, *ex;
-	int goal, err = 0, depth;
+	int err = 0;
 	mlfs_lblk_t allocated = 0;
-	mlfs_fsblk_t next, newblock;
 	int create;
-	uint64_t tsc_start = 0;
 
-	mlfs_assert(handle != NULL);
+	mlfs_assert(handle);
 
 	create = flags & MLFS_GET_BLOCKS_CREATE_DATA;
   int ret = map->m_len;
@@ -106,7 +107,7 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
   uint32_t len = map->m_len;
   bool set = false;
 
-  for (uint32_t i = 0; i < map->m_len; i++) {
+  for (mlfs_lblk_t i = 0; i < map->m_len;) {
     hash_value_t value;
     int pre = lookup_hash(inode, map->m_lblk + i, &value);
     if (!pre) {
@@ -115,13 +116,14 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 
     if (SPECIAL(value)) {
       len -= MAX_CONTIGUOUS_BLOCKS - INDEX(value);
-      i += MAX_CONTIGUOUS_BLOCKS - INDEX(value) - 1;
+      i += MAX_CONTIGUOUS_BLOCKS - INDEX(value);
       if (!set) {
         map->m_pblk = ADDR(value) + INDEX(value);
         set = true;
       }
     } else {
       --len;
+      ++i;
     }
 
   }
@@ -131,8 +133,6 @@ create:
   if (create) {
     mlfs_fsblk_t blockp;
     struct super_block *sb = get_inode_sb(handle->dev, inode);
-    int ret;
-    int retry_count = 0;
     enum alloc_type a_type;
 
     if (flags & MLFS_GET_BLOCKS_CREATE_DATA_LOG) {
@@ -147,19 +147,15 @@ create:
     for (int c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
       uint32_t nblocks_to_alloc = min(len - c, MAX_CONTIGUOUS_BLOCKS);
 
-      ret = mlfs_new_blocks(get_inode_sb(handle->dev, inode), &blockp,
-          nblocks_to_alloc, 0, 0, a_type, goal);
+      int r = mlfs_new_blocks(sb, &blockp, nblocks_to_alloc, 0, 0, a_type, 0);
 
-      if (ret > 0) {
-        bitmap_bits_set_range(get_inode_sb(handle->dev, inode)->s_blk_bitmap,
-            blockp, ret);
-        get_inode_sb(handle->dev, inode)->used_blocks += ret;
+      if (r > 0) {
+        bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
+        sb->used_blocks += r;
       } else if (ret == -ENOSPC) {
         panic("Fail to allocate block\n");
         try_migrate_blocks(g_root_dev, g_ssd_dev, 0, 1);
       }
-
-      if (err) fprintf(stderr, "ERR = %d\n", err);
 
       if (!set) {
         map->m_pblk = blockp;
@@ -172,14 +168,11 @@ create:
         int success = insert_hash(inode, lb + i, in);
 
         if (!success) {
-          fprintf(stderr, "%d, %d, %d: %d\n", 1, CONTINUITY_BITS,
+          fprintf(stderr, "%d, %d, %lu: %lu\n", 1, CONTINUITY_BITS,
               REMAINING_BITS, CHAR_BIT * sizeof(hash_value_t));
           fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
               lb + i, *((mlfs_fsblk_t*)&in));
         }
-
-        //blockp++;
-        //lb++;
       }
     }
 
@@ -191,13 +184,28 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 		mlfs_lblk_t start, mlfs_lblk_t end) {
   GHashTableIter iter;
   gpointer key, value;
+  hash_key_t k;
+  hash_value_t v;
 
   g_hash_table_iter_init (&iter, inode->htable);
   while (g_hash_table_iter_next (&iter, &key, &value)) {
-    mlfs_lblk_t lb = GPOINTER_TO_UINT(key);
-    mlfs_fsblk_t pb = GPOINTER_TO_UINT(value);
-    if (lb >= start && lb <= end) {
-      mlfs_free_blocks(handle, inode, NULL, lb, 1, 0);
+    k = GPTR2KEY(key);
+    v = GPTR2VAL(value);
+    int size = 1;
+    /*
+    if (SPECIAL(v) && INDEX(v) > 0) {
+      printf("SKIP %d, %d, %lu\n", SPECIAL(v), INDEX(v), ADDR(v));
+      g_hash_table_iter_remove(&iter);
+      continue;
+    } else if (SPECIAL(v)) {
+      size = MAX_CONTIGUOUS_BLOCKS;
+    }
+    */
+
+    if (GET_INUM(k) == inode->inum && GET_LBLK(k) >= start
+        && GET_LBLK(k) <= end) {
+      //printf("FREE %d, %d, %lu\n", SPECIAL(v), INDEX(v), ADDR(v));
+      mlfs_free_blocks(handle, inode, NULL, GET_LBLK(k), size, 0);
       g_hash_table_iter_remove(&iter);
     }
   }
@@ -216,9 +224,109 @@ double check_load_factor(struct inode *inode) {
 
 int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
   int ret = 0;
+  struct buffer_head *bh;
   GHashTable *hash = inode->htable;
+  struct super_block *sb = get_inode_sb(handle->dev, inode);
 
-  // alloc a big range for keys.
+  // Do the three big chunks:
+  size_t num_to_alloc = (sb->num_blocks * sizeof(gpointer)) >>
+    g_block_size_shift;
+  mlfs_fsblk_t start;
+
+  if (!inode->l1.addrs[0]) {
+    // allocate blocks for hashtable
+    int err;
+    mlfs_lblk_t count = 3 * num_to_alloc;
+    fprintf(stderr, "Preparing to allocate new meta blocks...\n");
+    start = mlfs_new_meta_blocks(handle, inode, 0,
+        MLFS_GET_BLOCKS_CREATE, &count, &err);
+    if (err < 0) {
+      fprintf(stderr, "Error: could not allocate new meta block: %d\n", err);
+      return err;
+    }
+    assert(err == count);
+    // Write keys
+    bh = bh_get_sync_IO(handle->dev, start, BH_NO_DATA_ALLOC);
+    assert(bh);
+
+    bh->b_data = (uint8_t*)hash->keys;
+    bh->b_size = hash->size;
+    bh->b_offset = 0;
+
+    ret = mlfs_write(bh);
+    assert(!ret);
+    bh_release(bh);
+    // Write hashes
+    bh = bh_get_sync_IO(handle->dev, start + num_to_alloc, BH_NO_DATA_ALLOC);
+    assert(bh);
+
+    bh->b_data = (uint8_t*)hash->hashes;
+    bh->b_size = hash->size;
+    bh->b_offset = 0;
+
+    ret = mlfs_write(bh);
+    assert(!ret);
+    bh_release(bh);
+    // Write values
+    bh = bh_get_sync_IO(handle->dev, start + (2 * num_to_alloc), BH_NO_DATA_ALLOC);
+    assert(bh);
+
+    bh->b_data = (uint8_t*)hash->values;
+    bh->b_size = hash->size;
+    bh->b_offset = 0;
+
+    ret = mlfs_write(bh);
+    assert(!ret);
+    bh_release(bh);
+
+    // Set up the hash table metadata in NVRAM
+    struct dhashtable_meta metadata = {
+      .size = hash->size,
+      .mod = hash->mod,
+      .mask = hash->mask,
+      .nnodes = hash->nnodes,
+      .noccupied = hash->noccupied,
+      .nblocks = num_to_alloc,
+      .keys_start = start,
+      .hashes_start = start + num_to_alloc,
+      .values_start = start + (2 * num_to_alloc)
+    };
+    *ghash_meta = metadata;
+
+    assert(inode->l1.addrs);
+    // allocate a block for metadata
+    count = 1;
+    fprintf(stderr, "Preparing to allocate new meta blocks...\n");
+    inode->l1.addrs[0] = mlfs_new_meta_blocks(handle, inode, 0,
+        MLFS_GET_BLOCKS_CREATE, &count, &err);
+    if (err < 0) {
+      fprintf(stderr, "Error: could not allocate new meta block: %d\n", err);
+      return err;
+    }
+    assert(err == count);
+    printf("Allocated meta block #%lu\n", inode->l1.addrs[0]);
+    // Write metadata to disk.
+    bh = bh_get_sync_IO(handle->dev, inode->l1.addrs[0], BH_NO_DATA_ALLOC);
+    //bh = bh_get_sync_IO(handle->dev, 8, BH_NO_DATA_ALLOC);
+    assert(bh);
+
+    bh->b_data = (uint8_t*)&metadata;
+    bh->b_size = sizeof(metadata);
+    bh->b_offset = 0;
+
+    printf("DING: %p, size %u to %08lx\n", bh->b_data, bh->b_size,
+        inode->l1.addrs[0]);
+    ret = mlfs_write(bh);
+    assert(!ret);
+
+    bh_release(bh);
+  } else {
+
+
+
+  }
+
+
 
   return ret;
 }
