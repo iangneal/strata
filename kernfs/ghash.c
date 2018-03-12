@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include "ghash.h"
 
+#define G_DISABLE_ASSERT
 
 /**
  * SECTION:hash_tables
@@ -205,14 +206,16 @@
 #define HASH_IS_TOMBSTONE(h_) ((h_) == TOMBSTONE_HASH_VALUE)
 #define HASH_IS_REAL(h_) ((h_) >= 2)
 
+#define TRUE 1
+#define FALSE 0
 
 typedef struct
 {
   GHashTable  *hash_table;
-  void*     dummy1;
-  void*     dummy2;
+  void*        dummy1;
+  void*        dummy2;
   int          position;
-  int     dummy3;
+  int          dummy3;
   int          version;
 } RealIter;
 
@@ -1523,8 +1526,7 @@ g_hash_table_foreach_remove (GHashTable *hash_table,
 uint32_t
 g_hash_table_foreach_steal (GHashTable *hash_table,
                             GHRFunc     func,
-                            void*    user_data)
-{
+                            void*    user_data) {
   g_return_val_if_fail (hash_table != NULL, 0);
   g_return_val_if_fail (func != NULL, 0);
 
@@ -1547,11 +1549,9 @@ g_hash_table_foreach_steal (GHashTable *hash_table,
  * See g_hash_table_find() for performance caveats for linear
  * order searches in contrast to g_hash_table_lookup().
  */
-void
-g_hash_table_foreach (GHashTable *hash_table,
-                      GHFunc      func,
-                      void*    user_data)
-{
+void g_hash_table_foreach (GHashTable *hash_table,
+                          GHFunc      func,
+                          void*    user_data) {
   int i;
 #ifndef G_DISABLE_ASSERT
   int version;
@@ -1564,19 +1564,19 @@ g_hash_table_foreach (GHashTable *hash_table,
   version = hash_table->version;
 #endif
 
-  for (i = 0; i < hash_table->size; i++)
-    {
-      uint32_t node_hash = hash_table->hashes[i];
-      void* node_key = hash_table->keys[i];
-      void* node_value = hash_table->values[i];
+  for (i = 0; i < hash_table->size; i++) {
+    uint32_t node_hash = hash_table->hashes[i];
+    void* node_key = hash_table->keys[i];
+    void* node_value = hash_table->values[i];
 
-      if (HASH_IS_REAL (node_hash))
-        (* func) (node_key, node_value, user_data);
+    if (HASH_IS_REAL (node_hash)) {
+      (* func) (node_key, node_value, user_data);
+    }
 
 #ifndef G_DISABLE_ASSERT
-      g_return_if_fail (version == hash_table->version);
+    g_return_if_fail (version == hash_table->version);
 #endif
-    }
+  }
 }
 
 /**
@@ -1625,22 +1625,21 @@ g_hash_table_find (GHashTable *hash_table,
 
   match = FALSE;
 
-  for (i = 0; i < hash_table->size; i++)
-    {
-      uint32_t node_hash = hash_table->hashes[i];
-      void* node_key = hash_table->keys[i];
-      void* node_value = hash_table->values[i];
+  for (i = 0; i < hash_table->size; i++) {
+    uint32_t node_hash = hash_table->hashes[i];
+    void* node_key = hash_table->keys[i];
+    void* node_value = hash_table->values[i];
 
-      if (HASH_IS_REAL (node_hash))
-        match = predicate (node_key, node_value, user_data);
+    if (HASH_IS_REAL (node_hash)) {
+      match = predicate (node_key, node_value, user_data);
+    }
 
 #ifndef G_DISABLE_ASSERT
-      g_return_val_if_fail (version == hash_table->version, NULL);
+    g_return_val_if_fail (version == hash_table->version, NULL);
 #endif
 
-      if (match)
-        return node_value;
-    }
+    if (match) return node_value;
+  }
 
   return NULL;
 }
@@ -1653,9 +1652,7 @@ g_hash_table_find (GHashTable *hash_table,
  *
  * Returns: the number of key/value pairs in the #GHashTable.
  */
-uint32_t
-g_hash_table_size (GHashTable *hash_table)
-{
+uint32_t g_hash_table_size (GHashTable *hash_table) {
   g_return_val_if_fail (hash_table != NULL, 0);
 
   return hash_table->nnodes;
@@ -1808,14 +1805,11 @@ g_hash_table_get_values (GHashTable *hash_table)
  *
  * Returns: %TRUE if the two keys match
  */
-int
-g_str_equal (const void* v1,
-             const void* v2)
-{
+int g_str_equal (const void* v1, const void* v2) {
   const char *string1 = v1;
   const char *string2 = v2;
 
-  return strcmp (string1, string2) == 0;
+  return strcmp(string1, string2) == 0;
 }
 
 /**
@@ -1839,14 +1833,13 @@ g_str_equal (const void* v1,
  *
  * Returns: a hash value corresponding to the key
  */
-uint32_t
-g_str_hash (const void* v)
-{
+uint32_t g_str_hash (const void* v) {
   const signed char *p;
   uint32_t h = 5381;
 
-  for (p = v; *p != '\0'; p++)
+  for (p = v; *p != '\0'; p++) {
     h = (h << 5) + h + *p;
+  }
 
   return h;
 }
@@ -1865,9 +1858,7 @@ g_str_hash (const void* v)
  *
  * Returns: a hash value corresponding to the key.
  */
-uint32_t
-g_direct_hash (const void* v)
-{
+uint32_t g_direct_hash (const void* v) {
   return GPOINTER_TO_UINT (v);
 }
 
@@ -1886,10 +1877,7 @@ g_direct_hash (const void* v)
  *
  * Returns: %TRUE if the two keys match.
  */
-int
-g_direct_equal (const void* v1,
-                const void* v2)
-{
+int g_direct_equal (const void* v1, const void* v2) {
   return v1 == v2;
 }
 
@@ -1910,10 +1898,7 @@ g_direct_equal (const void* v1,
  *
  * Returns: %TRUE if the two keys match.
  */
-int
-g_int_equal (const void* v1,
-             const void* v2)
-{
+int g_int_equal (const void* v1, const void* v2) {
   return *((const int*) v1) == *((const int*) v2);
 }
 
@@ -1931,9 +1916,7 @@ g_int_equal (const void* v1,
  *
  * Returns: a hash value corresponding to the key.
  */
-uint32_t
-g_int_hash (const void* v)
-{
+uint32_t g_int_hash (const void* v) {
   return *(const int*) v;
 }
 

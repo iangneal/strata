@@ -25,6 +25,8 @@
 #ifndef __G_HASH_MOD_H__
 #define __G_HASH_MOD_H__
 
+#include "gtypes.h"
+
 typedef struct _GHashTable
 {
   int             size;

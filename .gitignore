@@ -25,6 +25,7 @@ autom4te.cache/
 kernfs/tests/extent_test
 
 # Bench files.
+bench/hash_bench/hash_bench
 bench/hash_bench/hash_bench.o
 bench/hash_bench/time_stat.o
 bench/hash_bench/xxhash.o
