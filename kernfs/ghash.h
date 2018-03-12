@@ -89,100 +89,100 @@ int g_hash_table_remove(GHashTable *hash_table,
 
 void g_hash_table_remove_all(GHashTable *hash_table);
 
-int    g_hash_table_steal             (GHashTable     *hash_table,
-                                            const void*   key);
+int g_hash_table_steal(GHashTable *hash_table,
+                       const void *key);
 
-void        g_hash_table_steal_all         (GHashTable     *hash_table);
+void g_hash_table_steal_all(GHashTable *hash_table);
 
-void*    g_hash_table_lookup            (GHashTable     *hash_table,
-                                            const void*   key);
+void* g_hash_table_lookup(GHashTable *hash_table,
+                          const void *key);
 
-int    g_hash_table_contains          (GHashTable     *hash_table,
-                                            const void*   key);
+int g_hash_table_contains(GHashTable *hash_table,
+                          const void *key);
 
-int    g_hash_table_lookup_extended   (GHashTable     *hash_table,
-                                            const void*   lookup_key,
-                                            void*       *orig_key,
-                                            void*       *value);
+int g_hash_table_lookup_extended(GHashTable *hash_table,
+                                 const void *lookup_key,
+                                 void       **orig_key,
+                                 void       **value);
 
-void        g_hash_table_foreach           (GHashTable     *hash_table,
-                                            GHFunc          func,
-                                            void*        user_data);
+void g_hash_table_foreach(GHashTable *hash_table,
+                          GHFunc      func,
+                          void*       user_data);
 
-void*    g_hash_table_find              (GHashTable     *hash_table,
-                                            GHRFunc         predicate,
-                                            void*        user_data);
+void* g_hash_table_find(GHashTable *hash_table,
+                        GHRFunc     predicate,
+                        void*       user_data);
 
-unsigned       g_hash_table_foreach_remove    (GHashTable     *hash_table,
-                                            GHRFunc         func,
-                                            void*        user_data);
+unsigned g_hash_table_foreach_remove(GHashTable *hash_table,
+                                     GHRFunc     func,
+                                     void*       user_data);
 
-unsigned       g_hash_table_foreach_steal     (GHashTable     *hash_table,
-                                            GHRFunc         func,
-                                            void*        user_data);
+unsigned g_hash_table_foreach_steal(GHashTable *hash_table,
+                                    GHRFunc     func,
+                                    void*       user_data);
 
-unsigned       g_hash_table_size              (GHashTable     *hash_table);
+unsigned g_hash_table_size(GHashTable *hash_table);
 
-GList *     g_hash_table_get_keys          (GHashTable     *hash_table);
+GList* g_hash_table_get_keys(GHashTable *hash_table);
 
-GList *     g_hash_table_get_values        (GHashTable     *hash_table);
+GList* g_hash_table_get_values(GHashTable *hash_table);
 
-void* *  g_hash_table_get_keys_as_array (GHashTable     *hash_table,
-                                            unsigned          *length);
-
-
-void        g_hash_table_iter_init         (GHashTableIter *iter,
-                                            GHashTable     *hash_table);
-
-int    g_hash_table_iter_next         (GHashTableIter *iter,
-                                            void*       *key,
-                                            void*       *value);
-
-GHashTable* g_hash_table_iter_get_hash_table (GHashTableIter *iter);
-
-void        g_hash_table_iter_remove       (GHashTableIter *iter);
-
-void        g_hash_table_iter_replace      (GHashTableIter *iter,
-                                            void*        value);
-
-void        g_hash_table_iter_steal        (GHashTableIter *iter);
+void** g_hash_table_get_keys_as_array(GHashTable *hash_table,
+                                      unsigned *length);
 
 
-GHashTable* g_hash_table_ref               (GHashTable     *hash_table);
+void g_hash_table_iter_init(GHashTableIter *iter,
+                            GHashTable     *hash_table);
 
-void        g_hash_table_unref             (GHashTable     *hash_table);
+int g_hash_table_iter_next(GHashTableIter *iter,
+                           void **key,
+                           void **value);
+
+GHashTable* g_hash_table_iter_get_hash_table(GHashTableIter *iter);
+
+void g_hash_table_iter_remove(GHashTableIter *iter);
+
+void g_hash_table_iter_replace(GHashTableIter *iter,
+                               void *value);
+
+void g_hash_table_iter_steal(GHashTableIter *iter);
+
+
+GHashTable* g_hash_table_ref(GHashTable *hash_table);
+
+void g_hash_table_unref(GHashTable *hash_table);
 
 /* Hash Functions
  */
 
-int g_str_equal    (const void*  v1,
-                         const void*  v2);
+int g_str_equal(const void *v1,
+                const void *v2);
 
-unsigned    g_str_hash     (const void*  v);
-
-
-int g_int_equal    (const void*  v1,
-                         const void*  v2);
-
-unsigned    g_int_hash     (const void*  v);
+unsigned g_str_hash(const void *v);
 
 
-int g_int64_equal  (const void*  v1,
-                         const void*  v2);
+int g_int_equal(const void *v1,
+                const void *v2);
 
-unsigned    g_int64_hash   (const void*  v);
-
-
-int g_double_equal (const void*  v1,
-                         const void*  v2);
-
-unsigned    g_double_hash  (const void*  v);
+unsigned g_int_hash(const void *v);
 
 
-unsigned g_direct_hash (const void*  v);
+int g_int64_equal(const void *v1,
+                  const void *v2);
 
-int g_direct_equal (const void*  v1,
-                         const void*  v2) ;
+unsigned g_int64_hash(const void *v);
+
+
+int g_double_equal(const void *v1,
+                   const void *v2);
+
+unsigned g_double_hash(const void *v);
+
+
+unsigned g_direct_hash (const void *v);
+
+int g_direct_equal(const void *v1,
+                   const void *v2);
 
 
 #endif /* __G_HASH_MOD_H__ */

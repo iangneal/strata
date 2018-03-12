@@ -1952,10 +1952,7 @@ g_int_hash (const void* v)
  *
  * Since: 2.22
  */
-int
-g_int64_equal (const void* v1,
-               const void* v2)
-{
+int g_int64_equal (const void* v1, const void* v2) {
   return *((const int64_t*) v1) == *((const int64_t*) v2);
 }
 
@@ -1973,9 +1970,7 @@ g_int64_equal (const void* v1,
  *
  * Since: 2.22
  */
-uint32_t
-g_int64_hash (const void* v)
-{
+uint32_t g_int64_hash (const void* v) {
   return (uint32_t) *(const int64_t*) v;
 }
 
@@ -1994,10 +1989,7 @@ g_int64_hash (const void* v)
  *
  * Since: 2.22
  */
-int
-g_double_equal (const void* v1,
-                const void* v2)
-{
+int g_double_equal (const void* v1, const void* v2) {
   return *((const double*) v1) == *((const double*) v2);
 }
 
@@ -2014,8 +2006,6 @@ g_double_equal (const void* v1,
  *
  * Since: 2.22
  */
-uint32_t
-g_double_hash (const void* v)
-{
+uint32_t g_double_hash (const void* v) {
   return (uint32_t) *(const double*) v;
 }
