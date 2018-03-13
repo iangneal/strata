@@ -348,40 +348,35 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   node_index = hash_value % hash_table->mod;
   node_hash = hash_table->hashes[node_index];
 
-  while (!HASH_IS_UNUSED (node_hash))
-    {
-      /* We first check if our full hash values
-       * are equal so we can avoid calling the full-blown
-       * key equality function in most cases.
-       */
-      if (node_hash == hash_value)
-        {
-          void* node_key = hash_table->keys[node_index];
+  while (!HASH_IS_UNUSED (node_hash)) {
+    /* We first check if our full hash values
+     * are equal so we can avoid calling the full-blown
+     * key equality function in most cases.
+     */
+    if (node_hash == hash_value) {
+      void* node_key = hash_table->keys[node_index];
 
-          if (hash_table->key_equal_func)
-            {
-              if (hash_table->key_equal_func (node_key, key))
-                return node_index;
-            }
-          else if (node_key == key)
-            {
-              return node_index;
-            }
+      if (hash_table->key_equal_func) {
+        if (hash_table->key_equal_func (node_key, key)) {
+          return node_index;
         }
-      else if (HASH_IS_TOMBSTONE (node_hash) && !have_tombstone)
-        {
-          first_tombstone = node_index;
-          have_tombstone = TRUE;
-        }
-
-      step++;
-      node_index += step;
-      node_index &= hash_table->mask;
-      node_hash = hash_table->hashes[node_index];
+      } else if (node_key == key) {
+        return node_index;
+      }
+    } else if (HASH_IS_TOMBSTONE (node_hash) && !have_tombstone) {
+      first_tombstone = node_index;
+      have_tombstone = TRUE;
     }
 
-  if (have_tombstone)
+    step++;
+    node_index += step;
+    node_index &= hash_table->mask;
+    node_hash = hash_table->hashes[node_index];
+  }
+
+  if (have_tombstone) {
     return first_tombstone;
+  }
 
   return node_index;
 }
@@ -398,11 +393,9 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
  * If @notify is %TRUE then the destroy notify functions are called
  * for the key and value of the hash node.
  */
-static void
-g_hash_table_remove_node (GHashTable   *hash_table,
-                          int          i,
-                          int      notify)
-{
+static void g_hash_table_remove_node (GHashTable  *hash_table,
+                                      int          i,
+                                      int          notify) {
   void* key;
   void* value;
 
@@ -459,17 +452,15 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
 
   if (!notify ||
       (hash_table->key_destroy_func == NULL &&
-       hash_table->value_destroy_func == NULL))
-    {
-      if (!destruction)
-        {
-          memset (hash_table->hashes, 0, hash_table->size * sizeof (uint32_t));
-          memset (hash_table->keys, 0, hash_table->size * sizeof (void*));
-          memset (hash_table->values, 0, hash_table->size * sizeof (void*));
-        }
-
-      return;
+       hash_table->value_destroy_func == NULL)) {
+    if (!destruction) {
+      memset (hash_table->hashes, 0, hash_table->size * sizeof (uint32_t));
+      memset (hash_table->keys, 0, hash_table->size * sizeof (void*));
+      memset (hash_table->values, 0, hash_table->size * sizeof (void*));
     }
+
+    return;
+  }
 
   /* Keep the old storage space around to iterate over it. */
   old_size = hash_table->size;
@@ -484,37 +475,32 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
    * is not allowed. If accesses are done, then either an assert or crash
    * *will* happen. */
   g_hash_table_set_shift (hash_table, HASH_TABLE_MIN_SHIFT);
-  if (!destruction)
-    {
-      hash_table->keys   = g_new0 (void*, hash_table->size);
-      hash_table->values = hash_table->keys;
-      hash_table->hashes = g_new0 (uint32_t, hash_table->size);
+  if (!destruction) {
+    hash_table->keys   = g_new0 (void*, hash_table->size);
+    hash_table->values = hash_table->keys;
+    hash_table->hashes = g_new0 (uint32_t, hash_table->size);
+  } else {
+    hash_table->keys   = NULL;
+    hash_table->values = NULL;
+    hash_table->hashes = NULL;
+  }
+
+  for (i = 0; i < old_size; i++) {
+    if (HASH_IS_REAL (old_hashes[i])) {
+      key = old_keys[i];
+      value = old_values[i];
+
+      old_hashes[i] = UNUSED_HASH_VALUE;
+      old_keys[i] = NULL;
+      old_values[i] = NULL;
+
+      if (hash_table->key_destroy_func != NULL)
+        hash_table->key_destroy_func (key);
+
+      if (hash_table->value_destroy_func != NULL)
+        hash_table->value_destroy_func (value);
     }
-  else
-    {
-      hash_table->keys   = NULL;
-      hash_table->values = NULL;
-      hash_table->hashes = NULL;
-    }
-
-  for (i = 0; i < old_size; i++)
-    {
-      if (HASH_IS_REAL (old_hashes[i]))
-        {
-          key = old_keys[i];
-          value = old_values[i];
-
-          old_hashes[i] = UNUSED_HASH_VALUE;
-          old_keys[i] = NULL;
-          old_values[i] = NULL;
-
-          if (hash_table->key_destroy_func != NULL)
-            hash_table->key_destroy_func (key);
-
-          if (hash_table->value_destroy_func != NULL)
-            hash_table->value_destroy_func (value);
-        }
-    }
+  }
 
   /* Destroy old storage space. */
   if (old_keys != old_values)
@@ -538,8 +524,7 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
  * the probe sequences.
  */
 static void
-g_hash_table_resize (GHashTable *hash_table)
-{
+g_hash_table_resize (GHashTable *hash_table) {
   void* *new_keys;
   void* *new_values;
   uint32_t *new_hashes;
@@ -550,34 +535,34 @@ g_hash_table_resize (GHashTable *hash_table)
   g_hash_table_set_shift_from_size (hash_table, hash_table->nnodes * 2);
 
   new_keys = g_new0 (void*, hash_table->size);
-  if (hash_table->keys == hash_table->values)
+  if (hash_table->keys == hash_table->values) {
     new_values = new_keys;
-  else
+  } else {
     new_values = g_new0 (void*, hash_table->size);
+  }
+
   new_hashes = g_new0 (uint32_t, hash_table->size);
 
-  for (i = 0; i < old_size; i++)
-    {
-      uint32_t node_hash = hash_table->hashes[i];
-      uint32_t hash_val;
-      uint32_t step = 0;
+  for (i = 0; i < old_size; i++) {
+    uint32_t node_hash = hash_table->hashes[i];
+    uint32_t hash_val;
+    uint32_t step = 0;
 
-      if (!HASH_IS_REAL (node_hash))
-        continue;
+    if (!HASH_IS_REAL (node_hash))
+      continue;
 
-      hash_val = node_hash % hash_table->mod;
+    hash_val = node_hash % hash_table->mod;
 
-      while (!HASH_IS_UNUSED (new_hashes[hash_val]))
-        {
-          step++;
-          hash_val += step;
-          hash_val &= hash_table->mask;
-        }
-
-      new_hashes[hash_val] = hash_table->hashes[i];
-      new_keys[hash_val] = hash_table->keys[i];
-      new_values[hash_val] = hash_table->values[i];
+    while (!HASH_IS_UNUSED (new_hashes[hash_val])) {
+      step++;
+      hash_val += step;
+      hash_val &= hash_table->mask;
     }
+
+    new_hashes[hash_val] = hash_table->hashes[i];
+    new_keys[hash_val] = hash_table->keys[i];
+    new_values[hash_val] = hash_table->values[i];
+  }
 
   if (hash_table->keys != hash_table->values)
     g_free (hash_table->values);
@@ -602,14 +587,14 @@ g_hash_table_resize (GHashTable *hash_table)
  * too far from its ideal size for its number of nodes.
  */
 static inline void
-g_hash_table_maybe_resize (GHashTable *hash_table)
-{
+g_hash_table_maybe_resize (GHashTable *hash_table) {
   int noccupied = hash_table->noccupied;
   int size = hash_table->size;
 
   if ((size > hash_table->nnodes * 4 && size > 1 << HASH_TABLE_MIN_SHIFT) ||
-      (size <= noccupied + (noccupied / 16)))
+      (size <= noccupied + (noccupied / 16))) {
     g_hash_table_resize (hash_table);
+  }
 }
 
 /**
@@ -638,8 +623,7 @@ g_hash_table_maybe_resize (GHashTable *hash_table)
  */
 GHashTable *
 g_hash_table_new (GHashFunc  hash_func,
-                  GEqualFunc key_equal_func)
-{
+                  GEqualFunc key_equal_func) {
   return g_hash_table_new_full (hash_func, key_equal_func, NULL, NULL);
 }
 
@@ -763,21 +747,21 @@ g_hash_table_iter_next (GHashTableIter *iter,
 
   position = ri->position;
 
-  do
-    {
-      position++;
-      if (position >= ri->hash_table->size)
-        {
-          ri->position = position;
-          return FALSE;
-        }
+  do {
+    position++;
+    if (position >= ri->hash_table->size) {
+      ri->position = position;
+      return FALSE;
     }
-  while (!HASH_IS_REAL (ri->hash_table->hashes[position]));
+  } while (!HASH_IS_REAL (ri->hash_table->hashes[position]));
 
-  if (key != NULL)
+  if (key != NULL) {
     *key = ri->hash_table->keys[position];
-  if (value != NULL)
+  }
+
+  if (value != NULL) {
     *value = ri->hash_table->values[position];
+  }
 
   ri->position = position;
   return TRUE;
@@ -903,27 +887,23 @@ g_hash_table_insert_node (GHashTable *hash_table,
    *
    * We update the hash at the same time...
    */
-  if (already_exists)
-    {
-      /* Note: we must record the old value before writing the new key
-       * because we might change the value in the event that the two
-       * arrays are shared.
-       */
-      value_to_free = hash_table->values[node_index];
+  if (already_exists) {
+    /* Note: we must record the old value before writing the new key
+     * because we might change the value in the event that the two
+     * arrays are shared.
+     */
+    value_to_free = hash_table->values[node_index];
 
-      if (keep_new_key)
-        {
-          key_to_free = hash_table->keys[node_index];
-          hash_table->keys[node_index] = new_key;
-        }
-      else
-        key_to_free = new_key;
-    }
-  else
-    {
-      hash_table->hashes[node_index] = key_hash;
+    if (keep_new_key) {
+      key_to_free = hash_table->keys[node_index];
       hash_table->keys[node_index] = new_key;
+    } else {
+      key_to_free = new_key;
     }
+  } else {
+    hash_table->hashes[node_index] = key_hash;
+    hash_table->keys[node_index] = new_key;
+  }
 
   /* Step two: check if the value that we are about to write to the
    * table is the same as the key in the same position.  If it's not,
@@ -936,29 +916,26 @@ g_hash_table_insert_node (GHashTable *hash_table,
   hash_table->values[node_index] = new_value;
 
   /* Now, the bookkeeping... */
-  if (!already_exists)
-    {
-      hash_table->nnodes++;
+  if (!already_exists) {
+    hash_table->nnodes++;
 
-      if (HASH_IS_UNUSED (old_hash))
-        {
-          /* We replaced an empty node, and not a tombstone */
-          hash_table->noccupied++;
-          g_hash_table_maybe_resize (hash_table);
-        }
+    if (HASH_IS_UNUSED (old_hash)) {
+      /* We replaced an empty node, and not a tombstone */
+      hash_table->noccupied++;
+      g_hash_table_maybe_resize (hash_table);
+    }
 
 #ifndef G_DISABLE_ASSERT
-      hash_table->version++;
+    hash_table->version++;
 #endif
-    }
+  }
 
-  if (already_exists)
-    {
-      if (hash_table->key_destroy_func && !reusing_key)
-        (* hash_table->key_destroy_func) (key_to_free);
-      if (hash_table->value_destroy_func)
-        (* hash_table->value_destroy_func) (value_to_free);
-    }
+  if (already_exists) {
+    if (hash_table->key_destroy_func && !reusing_key)
+      (* hash_table->key_destroy_func) (key_to_free);
+    if (hash_table->value_destroy_func)
+      (* hash_table->value_destroy_func) (value_to_free);
+  }
 
   return !already_exists;
 }
@@ -1061,15 +1038,14 @@ g_hash_table_unref (GHashTable *hash_table)
 {
   g_return_if_fail (hash_table != NULL);
 
-  if (g_atomic_int_dec_and_test (&hash_table->ref_count))
-    {
-      g_hash_table_remove_all_nodes (hash_table, TRUE, TRUE);
-      if (hash_table->keys != hash_table->values)
-        g_free (hash_table->values);
-      g_free (hash_table->keys);
-      g_free (hash_table->hashes);
-      g_slice_free (GHashTable, hash_table);
-    }
+  if (g_atomic_int_dec_and_test (&hash_table->ref_count)) {
+    g_hash_table_remove_all_nodes (hash_table, TRUE, TRUE);
+    if (hash_table->keys != hash_table->values)
+      g_free (hash_table->values);
+    g_free (hash_table->keys);
+    g_free (hash_table->hashes);
+    g_slice_free (GHashTable, hash_table);
+  }
 }
 
 /**
@@ -1195,7 +1171,8 @@ g_hash_table_insert_internal (GHashTable *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &key_hash);
 
-  return g_hash_table_insert_node (hash_table, node_index, key_hash, key, value, keep_new_key, FALSE);
+  return g_hash_table_insert_node (hash_table, node_index, key_hash, key,
+      value, keep_new_key, FALSE);
 }
 
 /**
@@ -1451,23 +1428,21 @@ g_hash_table_foreach_remove_or_steal (GHashTable *hash_table,
   int version = hash_table->version;
 #endif
 
-  for (i = 0; i < hash_table->size; i++)
-    {
-      uint32_t node_hash = hash_table->hashes[i];
-      void* node_key = hash_table->keys[i];
-      void* node_value = hash_table->values[i];
+  for (i = 0; i < hash_table->size; i++) {
+    uint32_t node_hash = hash_table->hashes[i];
+    void* node_key = hash_table->keys[i];
+    void* node_value = hash_table->values[i];
 
-      if (HASH_IS_REAL (node_hash) &&
-          (* func) (node_key, node_value, user_data))
-        {
-          g_hash_table_remove_node (hash_table, i, notify);
-          deleted++;
-        }
+    if (HASH_IS_REAL (node_hash) &&
+        (* func) (node_key, node_value, user_data)) {
+      g_hash_table_remove_node (hash_table, i, notify);
+      deleted++;
+    }
 
 #ifndef G_DISABLE_ASSERT
-      g_return_val_if_fail (version == hash_table->version, 0);
+    g_return_val_if_fail (version == hash_table->version, 0);
 #endif
-    }
+  }
 
   g_hash_table_maybe_resize (hash_table);
 
