@@ -28,7 +28,8 @@ SPDK_DIR := $(abspath $(LIBFS_DIR)/lib/spdk)
 LIBSPDK_DIR := $(abspath $(LIBFS_DIR)/src/storage/spdk/)
 CUCKOO_FILTER_DIR := $(abspath $(LIBFS_DIR)/lib/cuckoofilter)
 CUCKOO_DIR := $(abspath $(LIBFS_DIR)/lib/libcuckoo)
-GLIB_DIR := $(abspath $(LIBFS_DIR)/lib/glib)
+#GLIB_DIR := $(abspath $(LIBFS_DIR)/lib/glib)
+GLIB_DIR :=
 JEMALLOC_DIR := $(abspath $(LIBFS_DIR)/lib/jemalloc-4.5.0)
 STORAGE_ENGINE := $(wildcard $(LIBFS_DIR)/build/storage/*.o)
 C_LIBCUCKOO_DIR := $(abspath $(LIBFS_DIR)/lib/libcuckoo-c/src)
@@ -38,7 +39,7 @@ INCLUDES  := $(addprefix -I, . $(LIBSPDK_DIR) $(NVML_DIR)/include $(CUCKOO_DIR) 
 
 LD_FLAGS = -lpthread -lm -L$(NVML_DIR)/nondebug/ -lpmem -lrt \
 	-L$(abspath $(C_LIBCUCKOO_DIR)/.libs) -lcuckoo_hash -Wl,-rpath=$(abspath $(C_LIBCUCKOO_DIR)/.libs) \
-	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) -lglib-2.0
+	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) #-lglib-2.0
 
 
 #MLFS_FLAGS = -DUSE_SLAB -DMLFS_INFO -DKERNFS

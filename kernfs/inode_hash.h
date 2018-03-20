@@ -33,7 +33,7 @@ typedef mlfs_fsblk_t hash_value_t;
 
 #define MAKEVAL(cond, idx, addr) (SBIT(cond) | IBITS(idx) | addr)
 
-#define GVAL2PTR(hv) (GUINT_TO_POINTER(hv))
+#define GVAL2PTR(hv) ((void*)(hv))
 #define GPTR2VAL(pt) ((uint64_t)pt)
 
 
@@ -41,7 +41,7 @@ typedef mlfs_fsblk_t hash_value_t;
 #define MAKEKEY(inode, key) (((uint64_t)inode->inum << 32) | key)
 #define GET_INUM(hk) (hk >> 32)
 #define GET_LBLK(hk) (hk & MASK_32)
-#define GKEY2PTR(hk) (GUINT_TO_POINTER(hk))
+#define GKEY2PTR(hk) ((void*)(hk))
 #define GPTR2KEY(pt) ((uint64_t)pt)
 typedef uint64_t hash_key_t;
 

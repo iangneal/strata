@@ -23,6 +23,7 @@ autom4te.cache/
 
 # Test files.
 kernfs/tests/extent_test
+kernfs/tests/kernfs
 
 # Bench files.
 bench/hash_bench/hash_bench

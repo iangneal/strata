@@ -1,4 +1,4 @@
-CC=gcc
+CC=gcc -std=c11
 CXX=g++ -std=c++11
 
 #CC = clang-3.8
@@ -12,7 +12,8 @@ NVML_DIR := $(abspath $(LIBFS_DIR)/lib/nvml/src)
 DPDK_DIR := $(abspath $(LIBFS_DIR)/lib/dpdk-16.07/x86_64-native-linuxapp-gcc)
 SPDK_DIR := $(abspath $(LIBFS_DIR)/lib/spdk)
 CUCKOO_DIR := $(abspath $(LIBFS_DIR)/lib/cuckoofilter)
-GLIB_DIR := $(abspath $(LIBFS_DIR)/lib/glib)
+#GLIB_DIR := $(abspath $(LIBFS_DIR)/lib/glib)
+GLIB_DIR :=
 LIBSPDK_DIR := $(abspath $(LIBFS_DIR)/src/storage/spdk/)
 C_LIBCUCKOO_DIR := $(abspath $(LIBFS_DIR)/lib/libcuckoo-c/src)
 
@@ -20,10 +21,10 @@ INCLUDES := $(addprefix -I, .. . $(LIBSPDK_DIR) $(NVML_DIR)/include $(CUCKOO_DIR
 
 LD_FLAGS = -lpthread -lm -L$(NVML_DIR)/nondebug/ -lpmem -lrt \
 	-L$(abspath $(C_LIBCUCKOO_DIR)/.libs) -lcuckoo_hash -Wl,-rpath=$(abspath $(C_LIBCUCKOO_DIR)/.libs) \
-	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) -lglib-2.0
+	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) #-lglib-2.0
 LD_FLAGS_CXX = -lpthread -lm -L$(NVML_DIR)/nondebug/ -lpmem -lrt \
 	-L$(abspath $(C_LIBCUCKOO_DIR)/.libs) -lcuckoo_hash -Wl,-rpath=$(abspath $(C_LIBCUCKOO_DIR)/.libs) \
-	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) -lglib-2.0
+	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) #-lglib-2.0
 #DEBUG = -g -O0
 DEBUG = -g -Ofast
 #DEBUG = -O3

@@ -6,6 +6,7 @@
 #define CUSTOM
 
 #ifndef CUSTOM
+#warning "Non-custom!"
 #include <glib.h>
 #include <glib/glib.h>
 

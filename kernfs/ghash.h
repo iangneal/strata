@@ -51,7 +51,6 @@ typedef int (*GHRFunc) (void* key,
                         void* value,
                         void* user_data);
 
-typedef struct _GHashTableIter GHashTableIter;
 
 struct _GHashTableIter
 {
@@ -64,6 +63,7 @@ struct _GHashTableIter
   void*      dummy6;
 };
 
+typedef struct _GHashTableIter GHashTableIter;
 
 GHashTable* g_hash_table_new(GHashFunc  hash_func,
                              GEqualFunc key_equal_func);
@@ -125,9 +125,11 @@ unsigned g_hash_table_foreach_steal(GHashTable *hash_table,
 
 unsigned g_hash_table_size(GHashTable *hash_table);
 
+#if 0
 GList* g_hash_table_get_keys(GHashTable *hash_table);
 
 GList* g_hash_table_get_values(GHashTable *hash_table);
+#endif
 
 void** g_hash_table_get_keys_as_array(GHashTable *hash_table,
                                       unsigned *length);

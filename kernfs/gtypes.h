@@ -45,7 +45,8 @@ typedef unsigned char   guchar;
 typedef unsigned short  gushort;
 typedef unsigned long   gulong;
 typedef unsigned int    guint;
-typedef uint32_t    guint32;
+typedef uint32_t        guint32;
+typedef uint64_t        guint64;
 
 typedef float   gfloat;
 typedef double  gdouble;
@@ -413,7 +414,8 @@ static inline gboolean _GLIB_CHECKED_ADD_U32 (guint32 *dest, guint32 a, guint32 
 static inline gboolean _GLIB_CHECKED_MUL_U32 (guint32 *dest, guint32 a, guint32 b) {
   return !__builtin_umul_overflow(a, b, dest); }
 static inline gboolean _GLIB_CHECKED_ADD_U64 (guint64 *dest, guint64 a, guint64 b) {
-  G_STATIC_ASSERT(sizeof (unsigned long long) == sizeof (guint64));
+  _Static_assert(sizeof (unsigned long long) == sizeof (guint64),
+      "unsigned long long != guint64!");
   return !__builtin_uaddll_overflow(a, b, (unsigned long long *) dest); }
 static inline gboolean _GLIB_CHECKED_MUL_U64 (guint64 *dest, guint64 a, guint64 b) {
   return !__builtin_umulll_overflow(a, b, (unsigned long long *) dest); }
@@ -428,6 +430,7 @@ static inline gboolean _GLIB_CHECKED_MUL_U64 (guint64 *dest, guint64 a, guint64 
   *dest = a * b; return !a || *dest / a == b; }
 #endif
 
+#if 0
 /* IEEE Standard 754 Single Precision Storage Format (gfloat):
  *
  *        31 30           23 22            0
@@ -494,6 +497,8 @@ union _GDoubleIEEE754
 #else /* !G_LITTLE_ENDIAN && !G_BIG_ENDIAN */
 #error unknown ENDIAN type
 #endif /* !G_LITTLE_ENDIAN && !G_BIG_ENDIAN */
+
+#endif
 
 typedef struct _GTimeVal                GTimeVal;
 
