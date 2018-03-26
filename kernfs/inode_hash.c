@@ -3,38 +3,9 @@
 #include <stdbool.h>
 #include "inode_hash.h"
 
-#define CUSTOM
-
-#ifndef CUSTOM
-#warning "Non-custom!"
-#include <glib.h>
-#include <glib/glib.h>
-
-// (iangneal): glib declares this structure within the ghash.c file, so I can't
-// reference the internal members at compile time. These fields are supposed to
-// be private, but I rather do this than directly hack the glib source code.
-struct _GHashTable {
-  gint             size;
-  gint             mod;
-  guint            mask;
-  gint             nnodes;
-  gint             noccupied;  /* nnodes + tombstones */
-
-  gpointer        *keys;
-  guint           *hashes;
-  gpointer        *values;
-
-  GHashFunc        hash_func;
-  GEqualFunc       key_equal_func;
-  gint             ref_count;
-  GDestroyNotify   key_destroy_func;
-  GDestroyNotify   value_destroy_func;
-};
-#else
 #include "ghash.h"
 
 #define GPOINTER_TO_UINT(x) ((uint64_t)x)
-#endif
 
 // (iangneal): Global hash table for all of NVRAM. Each inode has a point to
 // this one hash table just for abstraction of the inode interface.

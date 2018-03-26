@@ -75,6 +75,10 @@ typedef struct _GHashTable
 
   GDestroyNotify   key_destroy_func;
   GDestroyNotify   value_destroy_func;
+
+  // concurrency
+  pthread_rwlock_t *locks;
+  pthread_mutex_t *metalock;
 } GHashTable;
 
 typedef int (*GHRFunc) (void* key,

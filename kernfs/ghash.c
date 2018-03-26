@@ -319,6 +319,9 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   *hash_return = hash_value;
 
   node_index = hash_value % hash_table->mod;
+
+  pthread_rwlock_rdlock(hash_table->locks + node_index);
+
   nvram_read(hash_table->hashes + NV_IDX(node_index), hash_buffer);
   node_hash = hash_buffer[MLFS_FSBLK_T_BUF_IDX(node_index)];
 
@@ -344,6 +347,8 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
 
     step++;
     uint32_t new_idx = (node_index + step) & hash_table->mask;
+    pthread_rwlock_unlock(hash_table->locks + node_index);
+    pthread_rwlock_rdlock(hash_table->locks + new_idx);
     // if the next index would be outside of the block we read from nvram,
     // we need to read another block
     // TODO profile me and see how many times we actually have to do this
@@ -358,6 +363,8 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   if (have_tombstone) {
     return first_tombstone;
   }
+
+  pthread_rwlock_unlock(hash_table->locks + node_index);
 
   return node_index;
 }
@@ -381,6 +388,9 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
   mlfs_fsblk_t value;
   UNUSED(notify);
 
+  pthread_rwlock_wrlock(hash_table->locks + i);
+  pthread_mutex_lock(hash_table->metalock);
+
   key = nvram_read_entry(hash_table->keys, i);
   value = nvram_read_entry(hash_table->values, i);
 
@@ -390,6 +400,9 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
   hash_table->nnodes--;
   // update metadata on disk
   nvram_write_metadata(hash_table, hash_table->size);
+
+  pthread_mutex_unlock(hash_table->metalock);
+  pthread_rwlock_unlock(hash_table->locks + i);
 
 }
 
@@ -417,6 +430,7 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
   void* *old_values;
   uint32_t    *old_hashes;
 
+  assert(0);
   /* If the hash table is already empty, there is nothing to be done. */
   if (hash_table->nnodes == 0)
     return;
@@ -668,6 +682,17 @@ g_hash_table_new_full (GHashFunc      hash_func,
   hash_table->noccupied          = 0;
   hash_table->nvram_size         = max_entries;
 
+  // initialize read-writer locks
+  hash_table->locks = malloc(max_entries * sizeof(pthread_rwlock_t));
+  assert(hash_table->locks);
+  for (size_t i = 0; i < max_entries; ++i) {
+    int err = pthread_rwlock_init(hash_table->locks + i, NULL);
+    if (err) panic("Could not init rwlock!");
+  }
+  // init metadata lock
+  hash_table->metalock = malloc(sizeof(pthread_mutex_t));
+  pthread_mutex_init(hash_table->metalock, NULL);
+
   if (!nvram_read_metadata(hash_table, max_entries)) {
     printf("Metadata not set up. Allocating hashtable on NVRAM...\n");
     g_hash_table_set_shift_from_size(hash_table, max_entries);
@@ -717,6 +742,9 @@ g_hash_table_insert_node (GHashTable    *hash_table,
   mlfs_fsblk_t old_hash;
   mlfs_fsblk_t key_to_free = 0;
   mlfs_fsblk_t value_to_free = 0;
+
+  pthread_rwlock_wrlock(hash_table->locks + node_index);
+  pthread_mutex_lock(hash_table->metalock);
 
   old_hash = nvram_read_entry(hash_table->hashes, node_index);
   already_exists = HASH_IS_REAL (old_hash);
@@ -794,6 +822,8 @@ g_hash_table_insert_node (GHashTable    *hash_table,
 
   nvram_write_metadata(hash_table, hash_table->size);
 
+  pthread_mutex_lock(hash_table->metalock);
+  pthread_rwlock_unlock(hash_table->locks + node_index);
   return !already_exists;
 }
 
@@ -855,6 +885,11 @@ g_hash_table_destroy (GHashTable *hash_table)
 {
   assert (hash_table != NULL);
 
+  for (size_t i = 0; i < hash_table->nvram_size; ++i) {
+    int err = pthread_rwlock_destroy(hash_table->locks + i);
+    if (err) panic("Could not destroy rwlock!");
+  }
+
   g_hash_table_remove_all (hash_table);
   g_hash_table_unref (hash_table);
 }
@@ -879,14 +914,15 @@ mlfs_fsblk_t g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key) {
 
   node_index = g_hash_table_lookup_node(hash_table, key, &node_hash);
 
-#if 0
-  return HASH_IS_REAL(nvram_read_entry(hash_table->hashes, node_index))
-    ? nvram_read_entry(hash_table->values, node_index)
-    : 0;
-#endif
-  return HASH_IS_REAL(node_hash)
-    ? nvram_read_entry(hash_table->values, node_index)
-    : 0;
+  pthread_rwlock_rdlock(hash_table->locks + node_index);
+
+  mlfs_fsblk_t val = HASH_IS_REAL(node_hash)
+                      ? nvram_read_entry(hash_table->values, node_index)
+                      : 0;
+
+  pthread_rwlock_unlock(hash_table->locks + node_index);
+
+  return val;
 }
 
 /**
