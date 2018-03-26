@@ -1,69 +1,8 @@
-#include "kernfs_interface.h"
-#include "../io/block_io.h"
-#include "../io/buffer_head.h"
-#include "../extents.h"
-#include "../extents_bh.h"
-#include "../fs.h"
-#include "../balloc.h"
-#include "../mlfs/mlfs_user.h"
-#include "../global/global.h"
-#include "../global/util.h"
-#include "../global/defs.h"
-#include "../storage/storage.h"
-#include "../extents.h"
-#include "../extents_bh.h"
-#include "../slru.h"
-#include "../migrate.h"
-#ifdef HASHTABLE
-#include "../inode_hash.h"
-#endif
-
-#include <sys/resource.h>
-#include <algorithm>
-#include <cassert>
-#include <random>
-#include <iostream>
-#include <list>
-#include <vector>
-#include <unordered_set>
-#include <malloc.h>
-
-#include "time_stat.h"
+#include "extent_test.h"
 
 #define INUM 100
 
 using namespace std;
-
-enum SequenceType {
-  SEQUENTIAL = 0, REVERSE, RANDOM
-};
-
-const char* SequenceTypeNames[] = { "sequential", "reverse", "random" };
-
-class ExtentTest
-{
-  private:
-  struct inode *inode;
-
-  public:
-  void initialize(void);
-
-  void async_io_test(void);
-
-  static void hexdump(void *mem, unsigned int len);
-
-  list<mlfs_lblk_t> genLogicalBlockSequence(SequenceType s, mlfs_lblk_t from,
-      mlfs_lblk_t ti, uint32_t nr_block);
-
-  void run_read_block_test(uint32_t inum, mlfs_lblk_t from,
-    mlfs_lblk_t to, uint32_t nr_block);
-  void run_multi_block_test(mlfs_lblk_t from, mlfs_lblk_t to,
-    uint32_t nr_block);
-  void run_multi_block_test(list<mlfs_lblk_t> insert_order,
-    list<mlfs_lblk_t> lookup_order, int nr_block = 1);
-  void run_ftruncate_test(mlfs_lblk_t from, mlfs_lblk_t to,
-    uint32_t nr_block);
-};
 
 void ExtentTest::initialize(void)
 {
@@ -467,8 +406,12 @@ void ExtentTest::run_ftruncate_test(mlfs_lblk_t from,
   }
 }
 
-
-void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
+/*
+ * Returns:
+ * [average insert time, average lookup time]
+ */
+tuple<double, double>
+ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   list<mlfs_lblk_t> lookup_order, int nr_block)
 {
   int err;
@@ -564,6 +507,9 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_print(&lookup, NULL);
   cout << "LOOKUP TIME (per lookup [" << ls.n <<"] )" << endl;
   time_stats_print(&ls, NULL);
+
+  return tuple<double, double>(time_stats_get_avg(&hs),
+                               time_stats_get_avg(&ls));
 }
 
 
@@ -577,15 +523,17 @@ int main(int argc, char **argv)
   //cExtTest.run_multi_block_test(0, 100000 * g_block_size_bytes, 1);
   //cExtTest.run_ftruncate_test(1 * g_block_size_bytes, 10 * g_block_size_bytes, 5);
 
-  if (argc < 3) {
+  if (argc < 6) {
     cerr << "Usage: " << argv[0] << " INSERT_ORDER LOOKUP_ORDER" <<
-     " BLOCK_CHUCK_SIZE" <<  endl;
+     " BLOCK_CHUCK_SIZE INSERT_OUTPUT_FILE LOOKUP_OUTPUT_FILE" <<  endl;
     return 1;
   }
 
   int i = atoi(argv[1]);
   int l = atoi(argv[2]);
   int b = atoi(argv[3]);
+  string insert_data_file(argv[4]);
+  string lookup_data_file(argv[5]);
 
   cExtTest.initialize();
 
@@ -597,7 +545,25 @@ int main(int argc, char **argv)
   list<mlfs_lblk_t> lookup = cExtTest.genLogicalBlockSequence(
       (SequenceType)l, 0, 100000, b);
 
-  cExtTest.run_multi_block_test(insert, lookup, b);
+  tuple<double, double> res = cExtTest.run_multi_block_test(insert, lookup, b);
+
+  cout << get<0>(res) << endl;
+  cout << get<1>(res) << endl;
+
+  {
+    FILE* f = fopen(insert_data_file.c_str(), "a");
+    assert(f);
+    fprintf(f," ( %s \\rightarrow %s, %.2f ) ", SequenceTypeAbbr[i],
+        SequenceTypeAbbr[l], get<0>(res) * 1000000.0);
+    fclose(f);
+  }
+  {
+    FILE* f = fopen(lookup_data_file.c_str(), "a");
+    assert(f);
+    fprintf(f," ( %s \\rightarrow %s, %.2f ) ", SequenceTypeAbbr[i],
+        SequenceTypeAbbr[l], get<1>(res) * 1000000.0);
+    fclose(f);
+  }
 
   return 0;
 }

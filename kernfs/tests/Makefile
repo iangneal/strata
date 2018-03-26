@@ -54,7 +54,10 @@ BIN := kernfs fifo_cli extent_test
 all: $(BIN)
 
 clean:
-	rm -rf *.o $(BIN)
+	@rm -rfv *.o $(BIN)
+
+scrub:
+	@rm -rfv *.txt *.out *.log
 
 time_stat.o: time_stat.c
 	$(CC) time_stat.c -c -o time_stat.o -D_BSD_SOURCE
