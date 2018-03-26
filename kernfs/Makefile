@@ -58,7 +58,7 @@ MLFS_FLAGS += -DHASHTABLE
 
 #DEBUG = -g -O0
 #DEBUG = -g -Ofast
-DEBUG = -O3
+DEBUG = -g -O3
 
 ########
 #  vpath and compile function for each file

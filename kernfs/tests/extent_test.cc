@@ -516,9 +516,9 @@ void ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
 
 #ifdef HASHTABLE
   cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
-  cout << "Persisting hash table..." << endl;
-  assert(!mlfs_hash_persist(&handle, inode));
-  cout << "Hash table persisted." << endl;
+  //cout << "Persisting hash table..." << endl;
+  //assert(!mlfs_hash_persist(&handle, inode));
+  //cout << "Hash table persisted." << endl;
 #endif
   sync_all_buffers(g_bdev[g_root_dev]);
 

@@ -29,13 +29,13 @@
 #include <assert.h>
 #include <string.h>  /* memset */
 #include <stdint.h>
+#include <pthread.h>
+
 #include "ghash.h"
 
 #define G_DISABLE_ASSERT
 
 #define MAX(x,y) (x > y ? x : y)
-#define likely(x)      __builtin_expect(!!(x), 1)
-#define unlikely(x)    __builtin_expect(!!(x), 0)
 
 /**
  * SECTION:hash_tables
@@ -178,51 +178,17 @@
  * Returns: %TRUE if @a = @b; %FALSE otherwise
  */
 
-/**
- * GHashTableIter:
- *
- * A GHashTableIter structure represents an iterator that can be used
- * to iterate over the elements of a #GHashTable. GHashTableIter
- * structures are typically allocated on the stack and then initialized
- * with g_hash_table_iter_init().
- */
-
-/**
- * g_hash_table_freeze:
- * @hash_table: a #GHashTable
- *
- * This function is deprecated and will be removed in the next major
- * release of GLib. It does nothing.
- */
-
-/**
- * g_hash_table_thaw:
- * @hash_table: a #GHashTable
- *
- * This function is deprecated and will be removed in the next major
- * release of GLib. It does nothing.
- */
-
 #define HASH_TABLE_MIN_SHIFT 3  /* 1 << 3 == 8 buckets */
 
 #define UNUSED_HASH_VALUE 0
 #define TOMBSTONE_HASH_VALUE 1
 #define HASH_IS_UNUSED(h_) ((h_) == UNUSED_HASH_VALUE)
 #define HASH_IS_TOMBSTONE(h_) ((h_) == TOMBSTONE_HASH_VALUE)
+
 #define HASH_IS_REAL(h_) ((h_) >= 2)
 
 #define TRUE 1
 #define FALSE 0
-
-typedef struct
-{
-  GHashTable  *hash_table;
-  void*        dummy1;
-  void*        dummy2;
-  int          position;
-  int          dummy3;
-  int          version;
-} RealIter;
 
 /* Each table size has an associated prime modulo (the first prime
  * lower than the table size) used to find the initial bucket. Probing
@@ -328,14 +294,15 @@ g_hash_table_set_shift_from_size (GHashTable *hash_table, int size) {
  */
 static inline uint32_t
 g_hash_table_lookup_node (GHashTable    *hash_table,
-                          const void*  key,
-                          uint32_t         *hash_return) {
+                          mlfs_fsblk_t   key,
+                          uint32_t      *hash_return) {
   uint32_t node_index;
   uint32_t node_hash;
   uint32_t hash_value;
   uint32_t first_tombstone = 0;
   int have_tombstone = FALSE;
   uint32_t step = 0;
+  mlfs_fsblk_t hash_buffer[g_block_size_bytes / sizeof(mlfs_fsblk_t)];
 
   /* If this happens, then the application is probably doing too much work
    * from a destroy notifier. The alternative would be to crash any second
@@ -344,14 +311,16 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
    * table is empty prior to removing the last reference using g_hash_table_unref(). */
   assert (hash_table->ref_count > 0);
 
-  hash_value = hash_table->hash_func (key);
-  if (unlikely (!HASH_IS_REAL (hash_value)))
+  hash_value = hash_table->hash_func((void*)key);
+  if (unlikely (!HASH_IS_REAL (hash_value))) {
     hash_value = 2;
+  }
 
   *hash_return = hash_value;
 
   node_index = hash_value % hash_table->mod;
-  node_hash = hash_table->hashes[node_index];
+  nvram_read(hash_table->hashes + NV_IDX(node_index), hash_buffer);
+  node_hash = hash_buffer[MLFS_FSBLK_T_BUF_IDX(node_index)];
 
   while (!HASH_IS_UNUSED (node_hash)) {
     /* We first check if our full hash values
@@ -359,24 +328,31 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
      * key equality function in most cases.
      */
     if (node_hash == hash_value) {
-      void* node_key = hash_table->keys[node_index];
+      void* node_key = (void*) nvram_read_entry(hash_table->keys, node_index);
 
       if (hash_table->key_equal_func) {
-        if (hash_table->key_equal_func (node_key, key)) {
+        if (hash_table->key_equal_func (node_key, (gconstpointer) key)) {
           return node_index;
         }
-      } else if (node_key == key) {
+      } else if (node_key == (void*)key) {
         return node_index;
       }
-    } else if (HASH_IS_TOMBSTONE (node_hash) && !have_tombstone) {
+    } else if (HASH_IS_TOMBSTONE(node_hash) && !have_tombstone) {
       first_tombstone = node_index;
       have_tombstone = TRUE;
     }
 
     step++;
-    node_index += step;
-    node_index &= hash_table->mask;
-    node_hash = hash_table->hashes[node_index];
+    uint32_t new_idx = (node_index + step) & hash_table->mask;
+    // if the next index would be outside of the block we read from nvram,
+    // we need to read another block
+    // TODO profile me and see how many times we actually have to do this
+    if ( NV_IDX(new_idx) != NV_IDX(node_index)) {
+      nvram_read(hash_table->hashes + NV_IDX(new_idx), hash_buffer);
+    }
+
+    node_index = new_idx;
+    node_hash = hash_buffer[MLFS_FSBLK_T_BUF_IDX(new_idx)];
   }
 
   if (have_tombstone) {
@@ -401,26 +377,19 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
 static void g_hash_table_remove_node (GHashTable  *hash_table,
                                       int          i,
                                       int          notify) {
-  void* key;
-  void* value;
+  mlfs_fsblk_t key;
+  mlfs_fsblk_t value;
+  UNUSED(notify);
 
-  key = hash_table->keys[i];
-  value = hash_table->values[i];
+  key = nvram_read_entry(hash_table->keys, i);
+  value = nvram_read_entry(hash_table->values, i);
 
   /* Erect tombstone */
-  hash_table->hashes[i] = TOMBSTONE_HASH_VALUE;
-
-  /* Be GC friendly */
-  hash_table->keys[i] = NULL;
-  hash_table->values[i] = NULL;
+  nvram_update(hash_table->hashes, i, TOMBSTONE_HASH_VALUE);
 
   hash_table->nnodes--;
-
-  if (notify && hash_table->key_destroy_func)
-    hash_table->key_destroy_func (key);
-
-  if (notify && hash_table->value_destroy_func)
-    hash_table->value_destroy_func (value);
+  // update metadata on disk
+  nvram_write_metadata(hash_table, hash_table->size);
 
 }
 
@@ -437,8 +406,8 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
  */
 static void
 g_hash_table_remove_all_nodes (GHashTable *hash_table,
-                               int    notify,
-                               int    destruction)
+                               int         notify,
+                               int         destruction)
 {
   int i;
   void* key;
@@ -455,6 +424,9 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
   hash_table->nnodes = 0;
   hash_table->noccupied = 0;
 
+  nvram_write_metadata(hash_table, hash_table->size);
+
+#if 0
   if (!notify ||
       (hash_table->key_destroy_func == NULL &&
        hash_table->value_destroy_func == NULL)) {
@@ -468,7 +440,7 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
   }
 
   /* Keep the old storage space around to iterate over it. */
-  old_size = hash_table->size;
+  old_size   = hash_table->size;
   old_keys   = hash_table->keys;
   old_values = hash_table->values;
   old_hashes = hash_table->hashes;
@@ -481,10 +453,8 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
    * *will* happen. */
   g_hash_table_set_shift (hash_table, HASH_TABLE_MIN_SHIFT);
   if (!destruction) {
-    //hash_table->keys   = g_new0 (void*, hash_table->size);
     hash_table->keys   = calloc(hash_table->size, sizeof(void*));
     hash_table->values = hash_table->keys;
-    //hash_table->hashes = g_new0 (uint32_t, hash_table->size);
     hash_table->hashes = calloc(hash_table->size, sizeof(uint32_t));
   } else {
     hash_table->keys   = NULL;
@@ -501,24 +471,24 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
       old_keys[i] = NULL;
       old_values[i] = NULL;
 
-      if (hash_table->key_destroy_func != NULL)
-        hash_table->key_destroy_func (key);
+      if (hash_table->key_destroy_func != NULL) {
+        hash_table->key_destroy_func(key);
+      }
 
-      if (hash_table->value_destroy_func != NULL)
-        hash_table->value_destroy_func (value);
+      if (hash_table->value_destroy_func != NULL) {
+        hash_table->value_destroy_func(value);
+      }
     }
   }
 
   /* Destroy old storage space. */
   if (old_keys != old_values) {
-    //g_free (old_values);
     free(old_values);
   }
 
-  //g_free (old_keys);
-  //g_free (old_hashes);
   free(old_keys);
   free(old_hashes);
+#endif
 }
 
 /*
@@ -542,6 +512,9 @@ g_hash_table_resize (GHashTable *hash_table) {
   int old_size;
   int i;
 
+  // (iangneal): Hash table is to be PRE-ALLOCATED.
+  assert(0);
+#if 0
   old_size = hash_table->size;
   g_hash_table_set_shift_from_size (hash_table, hash_table->nnodes * 2);
 
@@ -590,6 +563,7 @@ g_hash_table_resize (GHashTable *hash_table) {
   hash_table->hashes = new_hashes;
 
   hash_table->noccupied = hash_table->nnodes;
+#endif
 }
 
 /*
@@ -600,16 +574,21 @@ g_hash_table_resize (GHashTable *hash_table) {
  *
  * Essentially, calls g_hash_table_resize() if the table has strayed
  * too far from its ideal size for its number of nodes.
+ *
+ * iangneal: Hijacking this function to assure that we haven't over-committed.
  */
 static inline void
 g_hash_table_maybe_resize (GHashTable *hash_table) {
   int noccupied = hash_table->noccupied;
   int size = hash_table->size;
 
+  assert(noccupied <= size);
+#if 0
   if ((size > hash_table->nnodes * 4 && size > 1 << HASH_TABLE_MIN_SHIFT) ||
       (size <= noccupied + (noccupied / 16))) {
     g_hash_table_resize (hash_table);
   }
+#endif
 }
 
 /**
@@ -638,8 +617,9 @@ g_hash_table_maybe_resize (GHashTable *hash_table) {
  */
 GHashTable *
 g_hash_table_new (GHashFunc  hash_func,
-                  GEqualFunc key_equal_func) {
-  return g_hash_table_new_full (hash_func, key_equal_func, NULL, NULL);
+                  GEqualFunc key_equal_func,
+                  size_t     max_entries) {
+  return g_hash_table_new_full (hash_func, key_equal_func, NULL, NULL, max_entries);
 }
 
 
@@ -672,184 +652,38 @@ GHashTable *
 g_hash_table_new_full (GHashFunc      hash_func,
                        GEqualFunc     key_equal_func,
                        GDestroyNotify key_destroy_func,
-                       GDestroyNotify value_destroy_func)
+                       GDestroyNotify value_destroy_func,
+                       size_t         max_entries)
 {
   GHashTable *hash_table;
 
-  //hash_table = g_slice_new (GHashTable);
   hash_table = malloc(sizeof(*hash_table));
-  g_hash_table_set_shift (hash_table, HASH_TABLE_MIN_SHIFT);
-  hash_table->nnodes             = 0;
-  hash_table->noccupied          = 0;
+
   hash_table->hash_func          = hash_func ? hash_func : g_direct_hash;
   hash_table->key_equal_func     = key_equal_func;
-  hash_table->ref_count          = 1;
-#ifndef G_DISABLE_ASSERT
-  hash_table->version            = 0;
-#endif
   hash_table->key_destroy_func   = key_destroy_func;
   hash_table->value_destroy_func = value_destroy_func;
-  //hash_table->keys               = g_new0 (void*, hash_table->size);
-  hash_table->keys               = calloc(hash_table->size, sizeof(void*));
-  hash_table->values             = hash_table->keys;
-  //hash_table->hashes             = g_new0 (uint32_t, hash_table->size);
-  hash_table->hashes             = calloc(hash_table->size, sizeof(uint32_t));
+  hash_table->ref_count          = 1;
+  hash_table->nnodes             = 0;
+  hash_table->noccupied          = 0;
+  hash_table->nvram_size         = max_entries;
+
+  if (!nvram_read_metadata(hash_table, max_entries)) {
+    printf("Metadata not set up. Allocating hashtable on NVRAM...\n");
+    g_hash_table_set_shift_from_size(hash_table, max_entries);
+    // (iangneal): Allocate 3 strips in NVRAM for these three arrays.
+    size_t nblocks = NV_IDX(max_entries);
+    hash_table->keys   = nvram_alloc_range(nblocks);
+    hash_table->values = nvram_alloc_range(nblocks);
+    hash_table->hashes = nvram_alloc_range(nblocks);
+
+    nvram_write_metadata(hash_table, max_entries);
+  } else {
+    printf("Metadata found!\n");
+  }
+
 
   return hash_table;
-}
-
-/**
- * g_hash_table_iter_init:
- * @iter: an uninitialized #GHashTableIter
- * @hash_table: a #GHashTable
- *
- * Initializes a key/value pair iterator and associates it with
- * @hash_table. Modifying the hash table after calling this function
- * invalidates the returned iterator.
- * |[<!-- language="C" -->
- * GHashTableIter iter;
- * void* key, value;
- *
- * g_hash_table_iter_init (&iter, hash_table);
- * while (g_hash_table_iter_next (&iter, &key, &value))
- *   {
- *     // do something with key and value
- *   }
- * ]|
- *
- * Since: 2.16
- */
-void
-g_hash_table_iter_init (GHashTableIter *iter,
-                        GHashTable     *hash_table)
-{
-  RealIter *ri = (RealIter *) iter;
-
-  assert (iter != NULL);
-  assert (hash_table != NULL);
-
-  ri->hash_table = hash_table;
-  ri->position = -1;
-#ifndef G_DISABLE_ASSERT
-  ri->version = hash_table->version;
-#endif
-}
-
-/**
- * g_hash_table_iter_next:
- * @iter: an initialized #GHashTableIter
- * @key: (out) (optional): a location to store the key
- * @value: (out) (optional) (nullable): a location to store the value
- *
- * Advances @iter and retrieves the key and/or value that are now
- * pointed to as a result of this advancement. If %FALSE is returned,
- * @key and @value are not set, and the iterator becomes invalid.
- *
- * Returns: %FALSE if the end of the #GHashTable has been reached.
- *
- * Since: 2.16
- */
-int
-g_hash_table_iter_next (GHashTableIter *iter,
-                        void*       *key,
-                        void*       *value)
-{
-  RealIter *ri = (RealIter *) iter;
-  int position;
-
-  assert (iter != NULL);
-#ifndef G_DISABLE_ASSERT
-  assert(ri->version == ri->hash_table->version);
-#endif
-  assert(ri->position < ri->hash_table->size);
-
-  position = ri->position;
-
-  do {
-    position++;
-    if (position >= ri->hash_table->size) {
-      ri->position = position;
-      return FALSE;
-    }
-  } while (!HASH_IS_REAL (ri->hash_table->hashes[position]));
-
-  if (key != NULL) {
-    *key = ri->hash_table->keys[position];
-  }
-
-  if (value != NULL) {
-    *value = ri->hash_table->values[position];
-  }
-
-  ri->position = position;
-  return TRUE;
-}
-
-/**
- * g_hash_table_iter_get_hash_table:
- * @iter: an initialized #GHashTableIter
- *
- * Returns the #GHashTable associated with @iter.
- *
- * Returns: the #GHashTable associated with @iter.
- *
- * Since: 2.16
- */
-GHashTable *
-g_hash_table_iter_get_hash_table (GHashTableIter *iter)
-{
-  assert(iter != NULL);
-
-  return ((RealIter *) iter)->hash_table;
-}
-
-static void
-iter_remove_or_steal (RealIter *ri, int notify)
-{
-  assert (ri != NULL);
-#ifndef G_DISABLE_ASSERT
-  assert (ri->version == ri->hash_table->version);
-#endif
-  assert (ri->position >= 0);
-  assert (ri->position < ri->hash_table->size);
-
-  g_hash_table_remove_node (ri->hash_table, ri->position, notify);
-
-#ifndef G_DISABLE_ASSERT
-  ri->version++;
-  ri->hash_table->version++;
-#endif
-}
-
-/**
- * g_hash_table_iter_remove:
- * @iter: an initialized #GHashTableIter
- *
- * Removes the key/value pair currently pointed to by the iterator
- * from its associated #GHashTable. Can only be called after
- * g_hash_table_iter_next() returned %TRUE, and cannot be called
- * more than once for the same key/value pair.
- *
- * If the #GHashTable was created using g_hash_table_new_full(),
- * the key and value are freed using the supplied destroy functions,
- * otherwise you have to make sure that any dynamically allocated
- * values are freed yourself.
- *
- * It is safe to continue iterating the #GHashTable afterward:
- * |[<!-- language="C" -->
- * while (g_hash_table_iter_next (&iter, &key, &value))
- *   {
- *     if (condition)
- *       g_hash_table_iter_remove (&iter);
- *   }
- * ]|
- *
- * Since: 2.16
- */
-void
-g_hash_table_iter_remove (GHashTableIter *iter)
-{
-  iter_remove_or_steal ((RealIter *) iter, TRUE);
 }
 
 /*
@@ -871,20 +705,20 @@ g_hash_table_iter_remove (GHashTableIter *iter)
  * Returns: %TRUE if the key did not exist yet
  */
 static int
-g_hash_table_insert_node (GHashTable *hash_table,
+g_hash_table_insert_node (GHashTable    *hash_table,
                           uint32_t       node_index,
                           uint32_t       key_hash,
-                          void*    new_key,
-                          void*    new_value,
-                          int    keep_new_key,
-                          int    reusing_key)
+                          mlfs_fsblk_t   new_key,
+                          mlfs_fsblk_t   new_value,
+                          int            keep_new_key,
+                          int            reusing_key)
 {
   int already_exists;
-  uint32_t old_hash;
-  void* key_to_free = NULL;
-  void* value_to_free = NULL;
+  mlfs_fsblk_t old_hash;
+  mlfs_fsblk_t key_to_free = 0;
+  mlfs_fsblk_t value_to_free = 0;
 
-  old_hash = hash_table->hashes[node_index];
+  old_hash = nvram_read_entry(hash_table->hashes, node_index);
   already_exists = HASH_IS_REAL (old_hash);
 
   /* Proceed in three steps.  First, deal with the key because it is the
@@ -910,32 +744,34 @@ g_hash_table_insert_node (GHashTable *hash_table,
      * because we might change the value in the event that the two
      * arrays are shared.
      */
-    value_to_free = hash_table->values[node_index];
+    value_to_free = nvram_read_entry(hash_table->values, node_index);
 
     if (keep_new_key) {
-      key_to_free = hash_table->keys[node_index];
-      hash_table->keys[node_index] = new_key;
+      key_to_free = nvram_read_entry(hash_table->keys, node_index);
+      nvram_update(hash_table->keys, node_index, new_key);
     } else {
       key_to_free = new_key;
     }
   } else {
-    hash_table->hashes[node_index] = key_hash;
-    hash_table->keys[node_index] = new_key;
+    nvram_update(hash_table->hashes, node_index, key_hash);
+    nvram_update(hash_table->keys, node_index, new_key);
   }
 
   /* Step two: check if the value that we are about to write to the
    * table is the same as the key in the same position.  If it's not,
    * split the table.
    */
+#if 0
   if (unlikely (hash_table->keys == hash_table->values &&
                 hash_table->keys[node_index] != new_value)) {
     //hash_table->values = g_memdup (hash_table->keys, sizeof (void*) * hash_table->size);
     hash_table->values = malloc(sizeof(void*) * hash_table->size);
     memcpy(hash_table->values, hash_table->keys, sizeof(void*) * hash_table->size);
   }
+#endif
 
   /* Step 3: Actually do the write */
-  hash_table->values[node_index] = new_value;
+  nvram_update(hash_table->values, node_index, new_value);
 
   /* Now, the bookkeeping... */
   if (!already_exists) {
@@ -944,84 +780,22 @@ g_hash_table_insert_node (GHashTable *hash_table,
     if (HASH_IS_UNUSED (old_hash)) {
       /* We replaced an empty node, and not a tombstone */
       hash_table->noccupied++;
-      g_hash_table_maybe_resize (hash_table);
     }
-
-#ifndef G_DISABLE_ASSERT
-    hash_table->version++;
-#endif
   }
 
+#if 0
   if (already_exists) {
     if (hash_table->key_destroy_func && !reusing_key)
       (* hash_table->key_destroy_func) (key_to_free);
     if (hash_table->value_destroy_func)
       (* hash_table->value_destroy_func) (value_to_free);
   }
+#endif
+
+  nvram_write_metadata(hash_table, hash_table->size);
 
   return !already_exists;
 }
-
-/**
- * g_hash_table_iter_replace:
- * @iter: an initialized #GHashTableIter
- * @value: the value to replace with
- *
- * Replaces the value currently pointed to by the iterator
- * from its associated #GHashTable. Can only be called after
- * g_hash_table_iter_next() returned %TRUE.
- *
- * If you supplied a @value_destroy_func when creating the
- * #GHashTable, the old value is freed using that function.
- *
- * Since: 2.30
- */
-void
-g_hash_table_iter_replace (GHashTableIter *iter,
-                           void*        value)
-{
-  RealIter *ri;
-  uint32_t node_hash;
-  void* key;
-
-  ri = (RealIter *) iter;
-
-  assert (ri != NULL);
-#ifndef G_DISABLE_ASSERT
-  assert (ri->version == ri->hash_table->version);
-#endif
-  assert (ri->position >= 0);
-  assert (ri->position < ri->hash_table->size);
-
-  node_hash = ri->hash_table->hashes[ri->position];
-  key = ri->hash_table->keys[ri->position];
-
-  g_hash_table_insert_node (ri->hash_table, ri->position, node_hash, key, value, TRUE, TRUE);
-
-#ifndef G_DISABLE_ASSERT
-  ri->version++;
-  ri->hash_table->version++;
-#endif
-}
-
-/**
- * g_hash_table_iter_steal:
- * @iter: an initialized #GHashTableIter
- *
- * Removes the key/value pair currently pointed to by the
- * iterator from its associated #GHashTable, without calling
- * the key and value destroy functions. Can only be called
- * after g_hash_table_iter_next() returned %TRUE, and cannot
- * be called more than once for the same key/value pair.
- *
- * Since: 2.16
- */
-void
-g_hash_table_iter_steal (GHashTableIter *iter)
-{
-  iter_remove_or_steal ((RealIter *) iter, FALSE);
-}
-
 
 /**
  * g_hash_table_ref:
@@ -1061,20 +835,9 @@ g_hash_table_unref (GHashTable *hash_table)
 {
   assert (hash_table != NULL);
 
-  //if (g_atomic_int_dec_and_test (&hash_table->ref_count)) {
   if (__atomic_sub_fetch(&hash_table->ref_count, 1, __ATOMIC_SEQ_CST) == 0) {
-    g_hash_table_remove_all_nodes (hash_table, TRUE, TRUE);
-    if (hash_table->keys != hash_table->values) {
-      //g_free (hash_table->values);
-      free(hash_table->values);
-    }
-
-    //g_free (hash_table->keys);
-    //g_free (hash_table->hashes);
-    //g_slice_free (GHashTable, hash_table);
-    free(hash_table->keys);
-    free(hash_table->hashes);
-      free(hash_table);
+    // Don't call this function!
+    assert(0);
   }
 }
 
@@ -1085,8 +848,6 @@ g_hash_table_unref (GHashTable *hash_table)
  * Destroys all keys and values in the #GHashTable and decrements its
  * reference count by 1. If keys and/or values are dynamically allocated,
  * you should either free them first or create the #GHashTable with destroy
- * notifiers using g_hash_table_new_full(). In the latter case the destroy
- * functions you supplied will be called on all keys and values during the
  * destruction phase.
  */
 void
@@ -1110,20 +871,22 @@ g_hash_table_destroy (GHashTable *hash_table)
  *
  * Returns: (nullable): the associated value, or %NULL if the key is not found
  */
-void*
-g_hash_table_lookup (GHashTable    *hash_table,
-                     const void*  key)
-{
+mlfs_fsblk_t g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key) {
   uint32_t node_index;
   uint32_t node_hash;
 
   assert(hash_table != NULL);
 
-  node_index = g_hash_table_lookup_node (hash_table, key, &node_hash);
+  node_index = g_hash_table_lookup_node(hash_table, key, &node_hash);
 
-  return HASH_IS_REAL (hash_table->hashes[node_index])
-    ? hash_table->values[node_index]
-    : NULL;
+#if 0
+  return HASH_IS_REAL(nvram_read_entry(hash_table->hashes, node_index))
+    ? nvram_read_entry(hash_table->values, node_index)
+    : 0;
+#endif
+  return HASH_IS_REAL(node_hash)
+    ? nvram_read_entry(hash_table->values, node_index)
+    : 0;
 }
 
 /**
@@ -1155,7 +918,8 @@ g_hash_table_lookup_extended (GHashTable    *hash_table,
   uint32_t node_hash;
 
   assert(hash_table != NULL);
-
+  assert(0); // don't call me
+#if 0
   node_index = g_hash_table_lookup_node (hash_table, lookup_key, &node_hash);
 
   if (!HASH_IS_REAL (hash_table->hashes[node_index]))
@@ -1167,6 +931,7 @@ g_hash_table_lookup_extended (GHashTable    *hash_table,
   if (value)
     *value = hash_table->values[node_index];
 
+#endif
   return TRUE;
 }
 
@@ -1190,8 +955,8 @@ g_hash_table_lookup_extended (GHashTable    *hash_table,
  */
 static int
 g_hash_table_insert_internal (GHashTable *hash_table,
-                              void*    key,
-                              void*    value,
+                              mlfs_fsblk_t    key,
+                              mlfs_fsblk_t    value,
                               int    keep_new_key)
 {
   uint32_t key_hash;
@@ -1224,8 +989,8 @@ g_hash_table_insert_internal (GHashTable *hash_table,
  */
 int
 g_hash_table_insert (GHashTable *hash_table,
-                     void*    key,
-                     void*    value)
+                     mlfs_fsblk_t    key,
+                     mlfs_fsblk_t    value)
 {
   return g_hash_table_insert_internal (hash_table, key, value, FALSE);
 }
@@ -1248,8 +1013,8 @@ g_hash_table_insert (GHashTable *hash_table,
  */
 int
 g_hash_table_replace (GHashTable *hash_table,
-                      void*    key,
-                      void*    value)
+                      mlfs_fsblk_t key,
+                      mlfs_fsblk_t value)
 {
   return g_hash_table_insert_internal (hash_table, key, value, TRUE);
 }
@@ -1273,7 +1038,7 @@ g_hash_table_replace (GHashTable *hash_table,
  */
 int
 g_hash_table_add (GHashTable *hash_table,
-                  void*    key)
+                  mlfs_fsblk_t    key)
 {
   return g_hash_table_insert_internal (hash_table, key, key, TRUE);
 }
@@ -1291,7 +1056,7 @@ g_hash_table_add (GHashTable *hash_table,
  **/
 int
 g_hash_table_contains (GHashTable    *hash_table,
-                       const void*  key)
+                       mlfs_fsblk_t  key)
 {
   uint32_t node_index;
   uint32_t node_hash;
@@ -1300,7 +1065,7 @@ g_hash_table_contains (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &node_hash);
 
-  return HASH_IS_REAL (hash_table->hashes[node_index]);
+  return HASH_IS_REAL (node_hash);
 }
 
 /*
@@ -1318,8 +1083,8 @@ g_hash_table_contains (GHashTable    *hash_table,
  */
 static int
 g_hash_table_remove_internal (GHashTable    *hash_table,
-                              const void*  key,
-                              int       notify)
+                              mlfs_fsblk_t   key,
+                              int            notify)
 {
   uint32_t node_index;
   uint32_t node_hash;
@@ -1328,15 +1093,10 @@ g_hash_table_remove_internal (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &node_hash);
 
-  if (!HASH_IS_REAL (hash_table->hashes[node_index]))
+  if (!HASH_IS_REAL (node_hash))
     return FALSE;
 
   g_hash_table_remove_node (hash_table, node_index, notify);
-  g_hash_table_maybe_resize (hash_table);
-
-#ifndef G_DISABLE_ASSERT
-  hash_table->version++;
-#endif
 
   return TRUE;
 }
@@ -1357,7 +1117,7 @@ g_hash_table_remove_internal (GHashTable    *hash_table,
  */
 int
 g_hash_table_remove (GHashTable    *hash_table,
-                     const void*  key)
+                     mlfs_fsblk_t  key)
 {
   return g_hash_table_remove_internal (hash_table, key, TRUE);
 }
@@ -1374,7 +1134,7 @@ g_hash_table_remove (GHashTable    *hash_table,
  */
 int
 g_hash_table_steal (GHashTable    *hash_table,
-                    const void*  key)
+                    mlfs_fsblk_t  key)
 {
   return g_hash_table_remove_internal (hash_table, key, FALSE);
 }
@@ -1397,13 +1157,7 @@ g_hash_table_remove_all (GHashTable *hash_table)
 {
   assert (hash_table != NULL);
 
-#ifndef G_DISABLE_ASSERT
-  if (hash_table->nnodes != 0)
-    hash_table->version++;
-#endif
-
   g_hash_table_remove_all_nodes (hash_table, TRUE, FALSE);
-  g_hash_table_maybe_resize (hash_table);
 }
 
 /**
@@ -1420,13 +1174,7 @@ g_hash_table_steal_all (GHashTable *hash_table)
 {
   assert (hash_table != NULL);
 
-#ifndef G_DISABLE_ASSERT
-  if (hash_table->nnodes != 0)
-    hash_table->version++;
-#endif
-
   g_hash_table_remove_all_nodes (hash_table, FALSE, FALSE);
-  g_hash_table_maybe_resize (hash_table);
 }
 
 /*
@@ -1454,9 +1202,10 @@ g_hash_table_foreach_remove_or_steal (GHashTable *hash_table,
 {
   uint32_t deleted = 0;
   int i;
-#ifndef G_DISABLE_ASSERT
-  int version = hash_table->version;
-#endif
+
+  assert(0); // don't call me
+
+#if 0
 
   for (i = 0; i < hash_table->size; i++) {
     uint32_t node_hash = hash_table->hashes[i];
@@ -1469,16 +1218,7 @@ g_hash_table_foreach_remove_or_steal (GHashTable *hash_table,
       deleted++;
     }
 
-#ifndef G_DISABLE_ASSERT
-    assert (version == hash_table->version);
-#endif
   }
-
-  g_hash_table_maybe_resize (hash_table);
-
-#ifndef G_DISABLE_ASSERT
-  if (deleted > 0)
-    hash_table->version++;
 #endif
 
   return deleted;
@@ -1558,17 +1298,13 @@ void g_hash_table_foreach (GHashTable *hash_table,
                           GHFunc      func,
                           void*    user_data) {
   int i;
-#ifndef G_DISABLE_ASSERT
-  int version;
-#endif
 
   assert (hash_table != NULL);
   assert (func != NULL);
 
-#ifndef G_DISABLE_ASSERT
-  version = hash_table->version;
-#endif
+  assert(0);
 
+#if 0
   for (i = 0; i < hash_table->size; i++) {
     uint32_t node_hash = hash_table->hashes[i];
     void* node_key = hash_table->keys[i];
@@ -1578,10 +1314,8 @@ void g_hash_table_foreach (GHashTable *hash_table,
       (* func) (node_key, node_value, user_data);
     }
 
-#ifndef G_DISABLE_ASSERT
-    assert (version == hash_table->version);
-#endif
   }
+#endif
 }
 
 /**
@@ -1616,20 +1350,15 @@ g_hash_table_find (GHashTable *hash_table,
                    void*    user_data)
 {
   int i;
-#ifndef G_DISABLE_ASSERT
-  int version;
-#endif
   int match;
 
   assert(hash_table != NULL);
   assert(predicate != NULL);
 
-#ifndef G_DISABLE_ASSERT
-  version = hash_table->version;
-#endif
+  assert(0);
 
   match = FALSE;
-
+#if 0
   for (i = 0; i < hash_table->size; i++) {
     uint32_t node_hash = hash_table->hashes[i];
     void* node_key = hash_table->keys[i];
@@ -1639,12 +1368,9 @@ g_hash_table_find (GHashTable *hash_table,
       match = predicate (node_key, node_value, user_data);
     }
 
-#ifndef G_DISABLE_ASSERT
-    assert (version == hash_table->version);
-#endif
-
     if (match) return node_value;
   }
+#endif
 
   return NULL;
 }
@@ -1662,134 +1388,6 @@ uint32_t g_hash_table_size (GHashTable *hash_table) {
 
   return hash_table->nnodes;
 }
-
-/**
- * g_hash_table_get_keys:
- * @hash_table: a #GHashTable
- *
- * Retrieves every key inside @hash_table. The returned data is valid
- * until changes to the hash release those keys.
- *
- * This iterates over every entry in the hash table to build its return value.
- * To iterate over the entries in a #GHashTable more efficiently, use a
- * #GHashTableIter.
- *
- * Returns: (transfer container): a #GList containing all the keys
- *     inside the hash table. The content of the list is owned by the
- *     hash table and should not be modified or freed. Use g_list_free()
- *     when done using the list.
- *
- * Since: 2.14
- */
-#if 0
-GList *
-g_hash_table_get_keys (GHashTable *hash_table)
-{
-  int i;
-  GList *retval;
-
-  g_return_val_if_fail (hash_table != NULL, NULL);
-
-  retval = NULL;
-  for (i = 0; i < hash_table->size; i++)
-    {
-      if (HASH_IS_REAL (hash_table->hashes[i]))
-        retval = g_list_prepend (retval, hash_table->keys[i]);
-    }
-
-  return retval;
-}
-#endif
-
-/**
- * g_hash_table_get_keys_as_array:
- * @hash_table: a #GHashTable
- * @length: (out): the length of the returned array
- *
- * Retrieves every key inside @hash_table, as an array.
- *
- * The returned array is %NULL-terminated but may contain %NULL as a
- * key.  Use @length to determine the true length if it's possible that
- * %NULL was used as the value for a key.
- *
- * Note: in the common case of a string-keyed #GHashTable, the return
- * value of this function can be conveniently cast to (const char **).
- *
- * This iterates over every entry in the hash table to build its return value.
- * To iterate over the entries in a #GHashTable more efficiently, use a
- * #GHashTableIter.
- *
- * You should always free the return result with g_free().  In the
- * above-mentioned case of a string-keyed hash table, it may be
- * appropriate to use g_strfreev() if you call g_hash_table_steal_all()
- * first to transfer ownership of the keys.
- *
- * Returns: (array length=length) (transfer container): a
- *   %NULL-terminated array containing each key from the table.
- *
- * Since: 2.40
- **/
-#if 0
-void* *
-g_hash_table_get_keys_as_array (GHashTable *hash_table,
-                                uint32_t      *length)
-{
-  void* *result;
-  uint32_t i, j = 0;
-
-  result = g_new (void*, hash_table->nnodes + 1);
-  for (i = 0; i < hash_table->size; i++) {
-    if (HASH_IS_REAL (hash_table->hashes[i]))
-      result[j++] = hash_table->keys[i];
-  }
-
-  assert(j == hash_table->nnodes);
-  result[j] = NULL;
-
-  if (length)
-    *length = j;
-
-  return result;
-}
-#endif
-
-/**
- * g_hash_table_get_values:
- * @hash_table: a #GHashTable
- *
- * Retrieves every value inside @hash_table. The returned data
- * is valid until @hash_table is modified.
- *
- * This iterates over every entry in the hash table to build its return value.
- * To iterate over the entries in a #GHashTable more efficiently, use a
- * #GHashTableIter.
- *
- * Returns: (transfer container): a #GList containing all the values
- *     inside the hash table. The content of the list is owned by the
- *     hash table and should not be modified or freed. Use g_list_free()
- *     when done using the list.
- *
- * Since: 2.14
- */
-#if 0
-GList *
-g_hash_table_get_values (GHashTable *hash_table)
-{
-  int i;
-  GList *retval;
-
-  g_return_val_if_fail (hash_table != NULL, NULL);
-
-  retval = NULL;
-  for (i = 0; i < hash_table->size; i++)
-    {
-      if (HASH_IS_REAL (hash_table->hashes[i]))
-        retval = g_list_prepend (retval, hash_table->values[i]);
-    }
-
-  return retval;
-}
-#endif
 
 /* Hash functions.
  */
@@ -1864,7 +1462,7 @@ uint32_t g_str_hash (const void* v) {
  * Returns: a hash value corresponding to the key.
  */
 uint32_t g_direct_hash (const void* v) {
-  return (uint32_t)(v);
+  return (uint32_t)((uint64_t)(v) & 0xFFFFFFFF);
 }
 
 /**
@@ -1960,40 +1558,4 @@ int g_int64_equal (const void* v1, const void* v2) {
  */
 uint32_t g_int64_hash (const void* v) {
   return (uint32_t) *(const int64_t*) v;
-}
-
-/**
- * g_double_equal:
- * @v1: (not nullable): a pointer to a #double key
- * @v2: (not nullable): a pointer to a #double key to compare with @v1
- *
- * Compares the two #double values being pointed to and returns
- * %TRUE if they are equal.
- * It can be passed to g_hash_table_new() as the @key_equal_func
- * parameter, when using non-%NULL pointers to doubles as keys in a
- * #GHashTable.
- *
- * Returns: %TRUE if the two keys match.
- *
- * Since: 2.22
- */
-int g_double_equal (const void* v1, const void* v2) {
-  return *((const double*) v1) == *((const double*) v2);
-}
-
-/**
- * g_double_hash:
- * @v: (not nullable): a pointer to a #double key
- *
- * Converts a pointer to a #double to a hash value.
- * It can be passed to g_hash_table_new() as the @hash_func parameter,
- * It can be passed to g_hash_table_new() as the @hash_func parameter,
- * when using non-%NULL pointers to doubles as keys in a #GHashTable.
- *
- * Returns: a hash value corresponding to the key.
- *
- * Since: 2.22
- */
-uint32_t g_double_hash (const void* v) {
-  return (uint32_t) *(const double*) v;
 }
