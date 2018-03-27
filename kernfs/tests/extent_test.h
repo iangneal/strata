@@ -16,6 +16,8 @@
 #include "../migrate.h"
 #ifdef HASHTABLE
 #include "../inode_hash.h"
+extern uint64_t reads;
+extern uint64_t writes;
 #endif
 
 #include <sys/resource.h>

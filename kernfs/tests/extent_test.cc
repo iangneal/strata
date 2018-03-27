@@ -430,6 +430,8 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_init(&hs, insert_order.size());
   time_stats_init(&ls, lookup_order.size());
 
+  list<mlfs_fsblk_t> res_check;
+
 
   /* create all logical blocks */
   time_stats_start(&ts);
@@ -440,6 +442,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
     err = mlfs_ext_get_blocks(&handle, inode, &map,
       MLFS_GET_BLOCKS_CREATE);
     time_stats_stop(&hs);
+
     if (err < 0) {
       fprintf(stderr, "err: %s, lblk %x, fsblk: %lx\n",
         strerror(-err), lb, map.m_pblk);
@@ -452,6 +455,8 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       exit(-1);
     }
 
+    res_check.push_back(map.m_pblk);
+
     //fprintf(stdout, "INSERT [%d/%d] offset %u, block: %lx len %u\n",
     //    from, to, from, map.m_pblk, map.m_len);
   }
@@ -459,14 +464,17 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
 
 #ifdef HASHTABLE
   cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
+  cout << "Reads: " << reads << " Writes: " << writes << endl;
   //cout << "Persisting hash table..." << endl;
   //assert(!mlfs_hash_persist(&handle, inode));
   //cout << "Hash table persisted." << endl;
+  reads = 0; writes = 0;
 #endif
   sync_all_buffers(g_bdev[g_root_dev]);
 
   /* lookup */
   time_stats_start(&lookup);
+  auto expect = res_check.begin();
   for (mlfs_lblk_t lb : lookup_order) {
     map.m_lblk = lb;
     map.m_len = nr_block;
@@ -480,6 +488,14 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
         strerror(-err), lb, map.m_pblk);
       exit(-1);
     }
+
+    if (map.m_pblk != *expect) {
+      fprintf(stderr, "err: %s, lblk %x: expected %lx, got fsblk: %lx\n",
+        strerror(-err), lb, *expect, map.m_pblk);
+      exit(-1);
+    }
+
+    expect++;
 
     //fprintf(stdout, "LOOKUP [%u], block: %x -> %lx len %u\n",
     //    lb, map.m_lblk, map.m_pblk, map.m_len);
@@ -507,6 +523,9 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_print(&lookup, NULL);
   cout << "LOOKUP TIME (per lookup [" << ls.n <<"] )" << endl;
   time_stats_print(&ls, NULL);
+#ifdef HASHTABLE
+  cout << "Reads: " << reads << " Writes: " << writes << endl;
+#endif
 
   return tuple<double, double>(time_stats_get_avg(&hs),
                                time_stats_get_avg(&ls));
@@ -535,6 +554,12 @@ int main(int argc, char **argv)
   string insert_data_file(argv[4]);
   string lookup_data_file(argv[5]);
 
+  if (b <= 0) {
+    cerr << "ERROR: number of blocks (arg 3) must be positive, not " << b
+      << "!" << endl;
+    return 1;
+  }
+
   cExtTest.initialize();
 
   printf("Insert: %s, Lookup: %s\n", SequenceTypeNames[i],
@@ -546,9 +571,6 @@ int main(int argc, char **argv)
       (SequenceType)l, 0, 100000, b);
 
   tuple<double, double> res = cExtTest.run_multi_block_test(insert, lookup, b);
-
-  cout << get<0>(res) << endl;
-  cout << get<1>(res) << endl;
 
   {
     FILE* f = fopen(insert_data_file.c_str(), "a");
