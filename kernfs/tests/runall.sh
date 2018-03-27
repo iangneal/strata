@@ -16,6 +16,7 @@ fi
 for b in 1 16; do
   for i in `seq 0 2`; do
     for l in `seq 0 2`; do
+      sudo ../../libfs/bin/mkfs.mlfs 1
       sudo ./run.sh extent_test $i $l $b $1_$b.txt $2_$b.txt
     done
   done

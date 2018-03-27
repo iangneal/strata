@@ -553,15 +553,13 @@ int main(int argc, char **argv)
   {
     FILE* f = fopen(insert_data_file.c_str(), "a");
     assert(f);
-    fprintf(f," ( %s \\rightarrow %s, %.2f ) ", SequenceTypeAbbr[i],
-        SequenceTypeAbbr[l], get<0>(res) * 1000000.0);
+    fprintf(f," ( %d, %.2f ) ", (3 * i) + l, get<0>(res) * 1000000.0);
     fclose(f);
   }
   {
     FILE* f = fopen(lookup_data_file.c_str(), "a");
     assert(f);
-    fprintf(f," ( %s \\rightarrow %s, %.2f ) ", SequenceTypeAbbr[i],
-        SequenceTypeAbbr[l], get<1>(res) * 1000000.0);
+    fprintf(f," ( %d, %.2f ) ", (3 * i) + l, get<1>(res) * 1000000.0);
     fclose(f);
   }
 

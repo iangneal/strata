@@ -56,7 +56,7 @@ all: $(BIN)
 clean:
 	@rm -rfv *.o $(BIN)
 
-scrub:
+scrub: clean
 	@rm -rfv *.txt *.out *.log
 
 time_stat.o: time_stat.c
