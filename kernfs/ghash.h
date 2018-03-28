@@ -37,12 +37,14 @@ typedef struct {
   mlfs_fsblk_t key;
   mlfs_fsblk_t hash;
   mlfs_fsblk_t value;
-  mlfs_fsblk_t _dummy;
+  mlfs_fsblk_t _dummy; // used for alignment for NVRAM.
 } hash_entry_t;
 
 #define BUF_SIZE (g_block_size_bytes / sizeof(hash_entry_t))
 #define BUF_IDX(x) (x % (g_block_size_bytes / sizeof(hash_entry_t)))
 #define NV_IDX(x) (x / (g_block_size_bytes / sizeof(hash_entry_t)))
+
+#define HASHCACHE
 
 // This is the hash table meta-data that is persisted to NVRAM, that we may read
 // it and know everything we need to know in order to reconstruct it in memory.
@@ -89,6 +91,12 @@ typedef struct _GHashTable
   // concurrency
   pthread_rwlock_t *locks;
   pthread_mutex_t *metalock;
+
+  // caching
+#ifdef HASHCACHE
+  // array of blocks
+  hash_entry_t **cache;
+#endif
 } GHashTable;
 
 typedef int (*GHRFunc) (void* key,
@@ -186,23 +194,15 @@ int g_direct_equal(const void *v1,
 uint64_t reads;
 uint64_t writes;
 
-#define HASHCACHE
-
-#ifdef HASHCACHE
-//TODO lock me!
-bool valid;
-mlfs_fsblk_t cache_index;
-hash_entry_t cache[BUF_SIZE];
-#endif
-
 /*
  * Read a NVRAM block and stash the results into a user-provided buffer.
  * Used to read buckets and potentially iterate over them.
  *
  * buf -- needs to be at least g_block_size_bytes long!
+ * offset -- needs to be block aligned!
  */
 static void
-nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
+nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t *buf) {
   struct buffer_head *bh;
   int err;
 
@@ -210,13 +210,14 @@ nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
    * Do some caching!
    */
 #ifdef HASHCACHE
-  if (valid && cache_index == start) {
-    memcpy((uint8_t*)buf, (uint8_t*)cache, g_block_size_bytes);
+  // if NULL, then it got invalidated or never loaded.
+  if (ht->cache[offset]) {
+    memcpy((uint8_t*)buf, (uint8_t*)ht->cache[offset], g_block_size_bytes);
     return;
   }
 #endif
 
-  bh = bh_get_sync_IO(g_root_dev, start, BH_NO_DATA_ALLOC);
+  bh = bh_get_sync_IO(g_root_dev, ht->data + offset, BH_NO_DATA_ALLOC);
   bh->b_offset = 0;
   bh->b_size = g_block_size_bytes;
   bh->b_data = (uint8_t*)buf;
@@ -230,9 +231,12 @@ nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
   reads++;
 
 #ifdef HASHCACHE
-  valid = true;
-  memcpy((uint8_t*)cache, (uint8_t*)buf, g_block_size_bytes);
-  cache_index = start;
+  if (!ht->cache[offset]) {
+    ht->cache[offset] = malloc(g_block_size_bytes);
+    assert(ht->cache[offset]);
+  }
+
+  memcpy((uint8_t*)ht->cache[offset], (uint8_t*)buf, g_block_size_bytes);
 #endif
 }
 
@@ -241,10 +245,10 @@ nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
  * the block and nothing else. Index is offset from start (bytes).
  */
 static void
-nvram_read_entry(mlfs_fsblk_t start, mlfs_fsblk_t idx, hash_entry_t *ret) {
+nvram_read_entry(GHashTable *ht, mlfs_fsblk_t idx, hash_entry_t *ret) {
   mlfs_fsblk_t offset = NV_IDX(idx);
   hash_entry_t buf[BUF_SIZE];
-  nvram_read(start + offset, buf);
+  nvram_read(ht, offset, buf);
   *ret = buf[BUF_IDX(idx)];
 }
 /*
@@ -385,11 +389,11 @@ nvram_alloc_range(size_t count) {
  * index: byte index into range.
  */
 static inline void
-nvram_update(mlfs_fsblk_t start, mlfs_fsblk_t index, hash_entry_t* val) {
+nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   struct buffer_head *bh;
   int ret;
 
-  mlfs_fsblk_t block_addr = start + NV_IDX(index);
+  mlfs_fsblk_t block_addr = ht->data + NV_IDX(index);
   mlfs_fsblk_t block_offset = BUF_IDX(index) * sizeof(hash_entry_t);
 
   // TODO: maybe generalize for other devices.
@@ -405,8 +409,8 @@ nvram_update(mlfs_fsblk_t start, mlfs_fsblk_t index, hash_entry_t* val) {
   bh_release(bh);
   writes++;
 #ifdef HASHCACHE
-  if (valid && cache_index == block_addr) {
-    valid = false;
+  if (ht->cache[NV_IDX(index)]) {
+    ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
   }
 #endif
 }

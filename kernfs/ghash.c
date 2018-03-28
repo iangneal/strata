@@ -324,7 +324,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
 
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
-  nvram_read(hash_table->data + NV_IDX(node_index), buffer);
+  nvram_read(hash_table, NV_IDX(node_index), buffer);
   cur = buffer[BUF_IDX(node_index)];
   node_hash = cur.hash;
 
@@ -362,7 +362,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
     // we need to read another block
     // TODO profile me and see how many times we actually have to do this
     if ( NV_IDX(new_idx) != NV_IDX(node_index)) {
-      nvram_read(hash_table->data + NV_IDX(new_idx), buffer);
+      nvram_read(hash_table, NV_IDX(new_idx), buffer);
     }
 
     node_index = new_idx;
@@ -401,11 +401,11 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
   //pthread_rwlock_wrlock(hash_table->locks + i);
   //pthread_mutex_lock(hash_table->metalock);
 
-  nvram_read_entry(hash_table->data, i, &ent);
+  nvram_read_entry(hash_table, i, &ent);
   ent.hash = TOMBSTONE_HASH_VALUE;
 
   /* Erect tombstone */
-  nvram_update(hash_table->data, i, &ent);
+  nvram_update(hash_table, i, &ent);
 
   hash_table->nnodes--;
   // update metadata on disk
@@ -722,6 +722,12 @@ g_hash_table_new_full (GHashFunc      hash_func,
     printf("Metadata found!\n");
   }
 
+  // cache
+#ifdef HASHCACHE
+  hash_table->cache = malloc(sizeof(hash_entry_t*) * NV_IDX(max_entries));
+  assert(hash_table->cache);
+#endif
+
 
   return hash_table;
 }
@@ -762,7 +768,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
   //pthread_rwlock_wrlock(hash_table->locks + node_index);
   //pthread_mutex_lock(hash_table->metalock);
 
-  nvram_read_entry(hash_table->data, node_index, &ent);
+  nvram_read_entry(hash_table, node_index, &ent);
   already_exists = HASH_IS_REAL(ent.hash);
   old_hash = ent.hash;
 
@@ -798,7 +804,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
       ent.hash = key_hash;
       ent.key = new_key;
       ent.value = new_value;
-      nvram_update(hash_table->data, node_index, &ent);
+      nvram_update(hash_table, node_index, &ent);
     } else {
       key_to_free = new_key;
     }
@@ -808,7 +814,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
     ent.hash = key_hash;
     ent.key = new_key;
     ent.value = new_value;
-    nvram_update(hash_table->data, node_index, &ent);
+    nvram_update(hash_table, node_index, &ent);
   }
 
   /* Step two: check if the value that we are about to write to the
