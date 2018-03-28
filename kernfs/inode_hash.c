@@ -75,6 +75,10 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
     } else {
       --len;
       ++i;
+      if (!set) {
+        map->m_pblk = value;
+        set = true;
+      }
     }
 
   }
@@ -118,6 +122,8 @@ create:
         hash_value_t in = MAKEVAL(nblocks_to_alloc > 1, i, blockp);
 
         // check if exists first
+        // should already be checked for!
+        /*
         mlfs_fsblk_t cur;
         if (lookup_hash(inode, lb + i, &cur)) {
           if (cur != in) {
@@ -126,7 +132,8 @@ create:
             assert(cur == in);
           }
           continue;
-       }
+        }
+        */
 
         int success = insert_hash(inode, lb + i, in);
 
@@ -180,7 +187,7 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 double check_load_factor(struct inode *inode) {
   double load = 0.0;
   double allocated_size = (double)ghash->size;
-  double current_size = (double)ghash->nnodes;
+  double current_size = (double)ghash->noccupied;
   load = current_size / allocated_size;
   return load;
 }

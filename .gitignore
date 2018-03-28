@@ -25,6 +25,9 @@ autom4te.cache/
 kernfs/tests/extent_test
 kernfs/tests/fifo_cli
 kernfs/tests/*.o
+kernfs/tests/*.txt
+kernfs/tests/*.log
+kernfs/tests/*.out
 kernfs/tests/kernfs
 
 # Bench files.

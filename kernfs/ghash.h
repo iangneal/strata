@@ -33,8 +33,16 @@
 // Glib stuff
 #include "gtypes.h"
 
-#define MLFS_FSBLK_T_BUF_IDX(x) (x % (g_block_size_bytes / sizeof(mlfs_fsblk_t)))
-#define NV_IDX(x) (x / (g_block_size_bytes / sizeof(mlfs_fsblk_t)))
+typedef struct {
+  mlfs_fsblk_t key;
+  mlfs_fsblk_t hash;
+  mlfs_fsblk_t value;
+  mlfs_fsblk_t _dummy;
+} hash_entry_t;
+
+#define BUF_SIZE (g_block_size_bytes / sizeof(hash_entry_t))
+#define BUF_IDX(x) (x % (g_block_size_bytes / sizeof(hash_entry_t)))
+#define NV_IDX(x) (x / (g_block_size_bytes / sizeof(hash_entry_t)))
 
 // This is the hash table meta-data that is persisted to NVRAM, that we may read
 // it and know everything we need to know in order to reconstruct it in memory.
@@ -50,9 +58,10 @@ struct dhashtable_meta {
   gint noccupied;
   // Metadata about the on-disk state.
   mlfs_fsblk_t nvram_size;
-  mlfs_fsblk_t keys_start;
-  mlfs_fsblk_t hashes_start;
-  mlfs_fsblk_t values_start;
+  //mlfs_fsblk_t keys_start;
+  //mlfs_fsblk_t hashes_start;
+  //mlfs_fsblk_t values_start;
+  mlfs_fsblk_t data_start;
 };
 
 typedef struct _GHashTable
@@ -63,9 +72,10 @@ typedef struct _GHashTable
   int             nnodes;
   int             noccupied;  /* nnodes + tombstones */
 
-  mlfs_fsblk_t     keys;
-  mlfs_fsblk_t     hashes;
-  mlfs_fsblk_t     values;
+  //mlfs_fsblk_t     keys;
+  //mlfs_fsblk_t     hashes;
+  //mlfs_fsblk_t     values;
+  mlfs_fsblk_t     data;
   mlfs_fsblk_t     nvram_size;
   pthread_mutex_t *mutexes;
 
@@ -173,18 +183,22 @@ unsigned g_direct_hash (const void *v);
 int g_direct_equal(const void *v1,
                    const void *v2);
 
+uint64_t reads;
+uint64_t writes;
+
 /*
  * Read a NVRAM block and stash the results into a user-provided buffer.
  * Used to read buckets and potentially iterate over them.
  *
  * buf -- needs to be at least g_block_size_bytes long!
  */
-static inline void
-nvram_read(mlfs_fsblk_t start, mlfs_fsblk_t *buf) {
+static void
+nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
   struct buffer_head *bh;
   int err;
 
   bh = bh_get_sync_IO(g_root_dev, start, BH_NO_DATA_ALLOC);
+  bh->b_offset = 0;
   bh->b_size = g_block_size_bytes;
   bh->b_data = (uint8_t*)buf;
   bh_submit_read_sync_IO(bh);
@@ -194,18 +208,19 @@ nvram_read(mlfs_fsblk_t start, mlfs_fsblk_t *buf) {
   assert(!err);
 
   bh_release(bh);
+  reads++;
 }
 
 /*
  * Convenience wrapper for when you need to look up the single value within
  * the block and nothing else. Index is offset from start (bytes).
  */
-static inline mlfs_fsblk_t
-nvram_read_entry(mlfs_fsblk_t start, mlfs_fsblk_t idx) {
-  mlfs_fsblk_t offset = idx / (g_block_size_bytes / sizeof(mlfs_fsblk_t));
-  mlfs_fsblk_t buf[g_block_size_bytes / sizeof(mlfs_fsblk_t)];
+static void
+nvram_read_entry(mlfs_fsblk_t start, mlfs_fsblk_t idx, hash_entry_t *ret) {
+  mlfs_fsblk_t offset = NV_IDX(idx);
+  hash_entry_t buf[BUF_SIZE];
   nvram_read(start + offset, buf);
-  return buf[MLFS_FSBLK_T_BUF_IDX(idx)];
+  *ret = buf[BUF_IDX(idx)];
 }
 /*
  * Read the hashtable metadata from disk. If the size is zero, then we need to
@@ -214,7 +229,7 @@ nvram_read_entry(mlfs_fsblk_t start, mlfs_fsblk_t idx) {
  *
  * Returns 1 on success, 0 on failure.
  */
-static inline int
+static int
 nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
   struct buffer_head *bh;
   struct dhashtable_meta metadata;
@@ -244,9 +259,12 @@ nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
     hash->mask = metadata.mask;
     hash->nnodes = metadata.nnodes;
     hash->noccupied = metadata.noccupied;
+    hash->data = metadata.data_start;
+    /*
     hash->keys = metadata.keys_start;
     hash->hashes = metadata.hashes_start;
     hash->values = metadata.values_start;
+    */
   } else {
     // we need to do all of the allocation
     ret = 0;
@@ -269,7 +287,7 @@ nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
   return ret;
 }
 
-static inline int
+static int
 nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
   struct buffer_head *bh;
   int ret;
@@ -281,9 +299,12 @@ nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
     .mask = hash->mask,
     .nnodes = hash->nnodes,
     .noccupied = hash->noccupied,
+    .data_start = hash->data
+    /*
     .keys_start = hash->keys,
     .hashes_start = hash->hashes,
     .values_start = hash->values
+    */
   };
 
   // TODO: maybe generalize for other devices.
@@ -300,7 +321,7 @@ nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
   bh_release(bh);
 }
 
-static inline mlfs_fsblk_t
+static mlfs_fsblk_t
 nvram_alloc_range(size_t count) {
   int err;
   // TODO: maybe generalize this.
@@ -338,24 +359,25 @@ nvram_alloc_range(size_t count) {
  * index: byte index into range.
  */
 static inline void
-nvram_update(mlfs_fsblk_t start, mlfs_fsblk_t index, uint64_t val) {
+nvram_update(mlfs_fsblk_t start, mlfs_fsblk_t index, hash_entry_t* val) {
   struct buffer_head *bh;
   int ret;
 
   mlfs_fsblk_t block_addr = start + NV_IDX(index);
-  mlfs_fsblk_t block_offset = MLFS_FSBLK_T_BUF_IDX(index) * sizeof(mlfs_fsblk_t);
+  mlfs_fsblk_t block_offset = BUF_IDX(index) * sizeof(hash_entry_t);
 
   // TODO: maybe generalize for other devices.
   bh = bh_get_sync_IO(g_root_dev, block_addr, BH_NO_DATA_ALLOC);
   assert(bh);
 
-  bh->b_data = (uint8_t*)&val;
-  bh->b_size = sizeof(val);
+  bh->b_data = (uint8_t*)val;
+  bh->b_size = sizeof(hash_entry_t);
   bh->b_offset = block_offset;
 
   ret = mlfs_write(bh);
   assert(!ret);
   bh_release(bh);
+  writes++;
 }
 
 
