@@ -26,6 +26,7 @@ extern uint64_t writes;
 #include <random>
 #include <iostream>
 #include <list>
+#include <map>
 #include <tuple>
 #include <vector>
 #include <unordered_set>

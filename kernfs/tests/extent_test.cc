@@ -137,7 +137,7 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
   std::list<mlfs_lblk_t> merge_list;
   std::unordered_set<mlfs_lblk_t> merge_set;
   // inclusive range, so we don't want to go off the end.
-  std::uniform_int_distribution<mlfs_lblk_t> dist(from, to);
+  std::uniform_int_distribution<mlfs_lblk_t> dist(from, to - 1);
 
   int ntests = (to - from) / nr_block;
 
@@ -430,7 +430,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_init(&hs, insert_order.size());
   time_stats_init(&ls, lookup_order.size());
 
-  list<mlfs_fsblk_t> res_check;
+  std::map<mlfs_lblk_t, mlfs_fsblk_t> res_check;
 
 
   /* create all logical blocks */
@@ -443,7 +443,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       MLFS_GET_BLOCKS_CREATE);
     time_stats_stop(&hs);
 
-    if (err < 0) {
+    if (err < 0 || map.m_pblk == 0) {
       fprintf(stderr, "err: %s, lblk %x, fsblk: %lx\n",
         strerror(-err), lb, map.m_pblk);
       exit(-1);
@@ -455,7 +455,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       exit(-1);
     }
 
-    res_check.push_back(map.m_pblk);
+    res_check[lb] = map.m_pblk;
 
     //fprintf(stdout, "INSERT [%d/%d] offset %u, block: %lx len %u\n",
     //    from, to, from, map.m_pblk, map.m_len);
@@ -474,8 +474,10 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
 
   /* lookup */
   time_stats_start(&lookup);
-  auto expect = res_check.begin();
   for (mlfs_lblk_t lb : lookup_order) {
+
+    assert(res_check.find(lb) != res_check.end());
+
     map.m_lblk = lb;
     map.m_len = nr_block;
     map.m_pblk = 0;
@@ -489,13 +491,12 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       exit(-1);
     }
 
-    if (map.m_pblk != *expect) {
-      fprintf(stderr, "err: %s, lblk %x: expected %lx, got fsblk: %lx\n",
-        strerror(-err), lb, *expect, map.m_pblk);
+    if (map.m_pblk != res_check[lb]) {
+      fprintf(stderr, "error on lblk %x lookup: expected %lx, got fsblk: %lx\n",
+        lb, res_check[lb], map.m_pblk);
       exit(-1);
     }
 
-    expect++;
 
     //fprintf(stdout, "LOOKUP [%u], block: %x -> %lx len %u\n",
     //    lb, map.m_lblk, map.m_pblk, map.m_len);
