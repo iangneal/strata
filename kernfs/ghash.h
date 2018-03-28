@@ -186,6 +186,15 @@ int g_direct_equal(const void *v1,
 uint64_t reads;
 uint64_t writes;
 
+#define HASHCACHE
+
+#ifdef HASHCACHE
+//TODO lock me!
+bool valid;
+mlfs_fsblk_t cache_index;
+hash_entry_t cache[BUF_SIZE];
+#endif
+
 /*
  * Read a NVRAM block and stash the results into a user-provided buffer.
  * Used to read buckets and potentially iterate over them.
@@ -196,6 +205,16 @@ static void
 nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
   struct buffer_head *bh;
   int err;
+
+  /*
+   * Do some caching!
+   */
+#ifdef HASHCACHE
+  if (valid && cache_index == start) {
+    memcpy((uint8_t*)buf, (uint8_t*)cache, g_block_size_bytes);
+    return;
+  }
+#endif
 
   bh = bh_get_sync_IO(g_root_dev, start, BH_NO_DATA_ALLOC);
   bh->b_offset = 0;
@@ -209,6 +228,12 @@ nvram_read(mlfs_fsblk_t start, hash_entry_t *buf) {
 
   bh_release(bh);
   reads++;
+
+#ifdef HASHCACHE
+  valid = true;
+  memcpy((uint8_t*)cache, (uint8_t*)buf, g_block_size_bytes);
+  cache_index = start;
+#endif
 }
 
 /*
@@ -307,6 +332,7 @@ nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
     */
   };
 
+
   // TODO: maybe generalize for other devices.
   bh = bh_get_sync_IO(g_root_dev, nvram_size - 1, BH_NO_DATA_ALLOC);
   assert(bh);
@@ -378,6 +404,11 @@ nvram_update(mlfs_fsblk_t start, mlfs_fsblk_t index, hash_entry_t* val) {
   assert(!ret);
   bh_release(bh);
   writes++;
+#ifdef HASHCACHE
+  if (valid && cache_index == block_addr) {
+    valid = false;
+  }
+#endif
 }
 
 
