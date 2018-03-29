@@ -39,10 +39,27 @@ extern "C" {
 
 typedef struct {
   mlfs_fsblk_t key;
-  mlfs_fsblk_t hash;
+  //mlfs_fsblk_t hash;
   mlfs_fsblk_t value;
-  mlfs_fsblk_t _dummy; // used for alignment for NVRAM.
+  //mlfs_fsblk_t _dummy; // used for alignment for NVRAM.
 } hash_entry_t;
+
+#define UNUSED_HASH_VALUE 0
+#define TOMBSTONE_HASH_VALUE 1
+#define HASH_IS_UNUSED(h_) ((h_) == UNUSED_HASH_VALUE)
+#define HASH_IS_TOMBSTONE(h_) ((h_) == TOMBSTONE_HASH_VALUE)
+#define HASH_IS_REAL(h_) ((h_) >= 2)
+
+#define VTOMB (~0UL)
+#define VEMPTY (0UL)
+#define IS_TOMBSTONE(v) ((v) == VTOMB)
+#define IS_EMPTY(v) ((v) == VEMPTY)
+#define IS_VALID(v) (!(IS_TOMBSTONE(v) || IS_EMPTY(v)))
+/*
+#define HASH_IS_UNUSED(value) ((value) == UNUSED_HASH_VALUE)
+#define HASH_IS_TOMBSTONE(value) ((value) == TOMBSTONE_HASH_VALUE)
+#define HASH_IS_REAL(value) (!(HASH_IS_UNUSED(value) || HASH_IS_TOMBESTON(value)))
+*/
 
 #define BUF_SIZE (g_block_size_bytes / sizeof(hash_entry_t))
 #define BUF_IDX(x) (x % (g_block_size_bytes / sizeof(hash_entry_t)))
@@ -221,9 +238,7 @@ nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t **buf) {
     //memcpy((uint8_t*)buf, (uint8_t*)ht->cache[offset], g_block_size_bytes);
     *buf = ht->cache[offset];
     return;
-  }
-
-  if (!ht->cache[offset]) {
+  } else {
     ht->cache[offset] = (hash_entry_t*)malloc(g_block_size_bytes);
     assert(ht->cache[offset]);
     *buf = ht->cache[offset];

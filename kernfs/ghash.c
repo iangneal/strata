@@ -180,12 +180,6 @@
 
 #define HASH_TABLE_MIN_SHIFT 3  /* 1 << 3 == 8 buckets */
 
-#define UNUSED_HASH_VALUE 0
-#define TOMBSTONE_HASH_VALUE 1
-#define HASH_IS_UNUSED(h_) ((h_) == UNUSED_HASH_VALUE)
-#define HASH_IS_TOMBSTONE(h_) ((h_) == TOMBSTONE_HASH_VALUE)
-
-#define HASH_IS_REAL(h_) ((h_) >= 2)
 
 #define TRUE 1
 #define FALSE 0
@@ -298,7 +292,6 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
                           hash_entry_t  *ent_return,
                           uint32_t      *hash_return) {
   uint32_t node_index;
-  uint32_t node_hash;
   uint32_t hash_value;
   uint32_t first_tombstone = 0;
   int have_tombstone = FALSE;
@@ -326,30 +319,16 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
 
   nvram_read(hash_table, NV_IDX(node_index), &buffer);
   cur = buffer[BUF_IDX(node_index)];
-  node_hash = cur.hash;
 
-  while (!HASH_IS_UNUSED (node_hash)) {
+  while (!IS_EMPTY(cur.value)) {
     /* We first check if our full hash values
      * are equal so we can avoid calling the full-blown
      * key equality function in most cases.
      */
-    if (node_hash == hash_value) {
-      void* node_key = (void*) cur.key;
-
-      /*
-      if (hash_table->key_equal_func) {
-        if (hash_table->key_equal_func (node_key, (gconstpointer) key)) {
-          return node_index;
-        }
-      } else if (node_key == (void*)key) {
-        return node_index;
-      }
-      */
-      if (node_key == (void*)key) {
-        *ent_return = cur;
-        return node_index;
-      }
-    } else if (HASH_IS_TOMBSTONE(node_hash) && !have_tombstone) {
+    if (cur.key == key && IS_VALID(cur.value)) {
+      *ent_return = cur;
+      return node_index;
+    } else if (IS_TOMBSTONE(cur.value) && !have_tombstone) {
       first_tombstone = node_index;
       have_tombstone = TRUE;
     }
@@ -361,13 +340,12 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
     // if the next index would be outside of the block we read from nvram,
     // we need to read another block
     // TODO profile me and see how many times we actually have to do this
-    if ( NV_IDX(new_idx) != NV_IDX(node_index)) {
+    if (NV_IDX(new_idx) != NV_IDX(node_index)) {
       nvram_read(hash_table, NV_IDX(new_idx), &buffer);
     }
 
     node_index = new_idx;
     cur = buffer[BUF_IDX(node_index)];
-    node_hash = cur.hash;
   }
 
   if (have_tombstone) {
@@ -401,8 +379,8 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
   //pthread_rwlock_wrlock(hash_table->locks + i);
   //pthread_mutex_lock(hash_table->metalock);
 
-  nvram_read_entry(hash_table, i, &ent);
-  ent.hash = TOMBSTONE_HASH_VALUE;
+  //nvram_read_entry(hash_table, i, &ent);
+  ent.value = VTOMB;
 
   /* Erect tombstone */
   nvram_update(hash_table, i, &ent);
@@ -725,7 +703,7 @@ g_hash_table_new_full (GHashFunc      hash_func,
   // cache
 #ifdef HASHCACHE
   hash_table->dirty = -1;
-  hash_table->cache = malloc(sizeof(hash_entry_t*) * NV_IDX(max_entries));
+  hash_table->cache = calloc(NV_IDX(max_entries), sizeof(hash_entry_t*));
   assert(hash_table->cache);
 #endif
 
@@ -762,7 +740,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
 {
   int already_exists;
   hash_entry_t ent;
-  mlfs_fsblk_t old_hash;
+  //mlfs_fsblk_t old_hash;
   mlfs_fsblk_t key_to_free = 0;
   mlfs_fsblk_t value_to_free = 0;
 
@@ -770,8 +748,8 @@ g_hash_table_insert_node (GHashTable    *hash_table,
   //pthread_mutex_lock(hash_table->metalock);
 
   nvram_read_entry(hash_table, node_index, &ent);
-  already_exists = HASH_IS_REAL(ent.hash);
-  old_hash = ent.hash;
+  already_exists = IS_VALID(ent.value);
+  //old_hash = ent.hash;
 
   /* Proceed in three steps.  First, deal with the key because it is the
    * most complicated.  Then consider if we need to split the table in
@@ -802,7 +780,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
     if (keep_new_key) {
       //key_to_free = nvram_read_entry(hash_table->keys, node_index);
       key_to_free = ent.key;
-      ent.hash = key_hash;
+      //ent.hash = key_hash;
       ent.key = new_key;
       ent.value = new_value;
       nvram_update(hash_table, node_index, &ent);
@@ -812,7 +790,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
   } else {
     //nvram_update(hash_table->hashes, node_index, key_hash);
     //nvram_update(hash_table->keys, node_index, new_key);
-    ent.hash = key_hash;
+    //ent.hash = key_hash;
     ent.key = new_key;
     ent.value = new_value;
     nvram_update(hash_table, node_index, &ent);
@@ -838,10 +816,12 @@ g_hash_table_insert_node (GHashTable    *hash_table,
   if (!already_exists) {
     hash_table->nnodes++;
 
+    /*
     if (HASH_IS_UNUSED (old_hash)) {
-      /* We replaced an empty node, and not a tombstone */
+      // We replaced an empty node, and not a tombstone
       hash_table->noccupied++;
     }
+    */
   }
 
 #if 0
@@ -950,7 +930,7 @@ mlfs_fsblk_t g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key) {
 
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
-  mlfs_fsblk_t val = HASH_IS_REAL(ent.hash) ? ent.value : 0;
+  mlfs_fsblk_t val = !IS_TOMBSTONE(ent.value) ? ent.value : 0;
 
   //pthread_rwlock_unlock(hash_table->locks + node_index);
 
@@ -1134,7 +1114,7 @@ g_hash_table_contains (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &ent, &hash);
 
-  return HASH_IS_REAL (ent.hash);
+  return HASH_IS_REAL (hash);
 }
 
 /*
@@ -1163,7 +1143,7 @@ g_hash_table_remove_internal (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &ent, &hash);
 
-  if (!HASH_IS_REAL (ent.hash))
+  if (!HASH_IS_REAL (hash))
     return FALSE;
 
   g_hash_table_remove_node (hash_table, node_index, notify);
