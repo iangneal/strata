@@ -670,6 +670,7 @@ g_hash_table_new_full (GHashFunc      hash_func,
   hash_table->noccupied          = 0;
   hash_table->nvram_size         = max_entries;
 
+  size_t nblocks = NV_IDX(max_entries);
   // initialize read-writer locks
   hash_table->locks = malloc(max_entries * sizeof(pthread_rwlock_t));
   assert(hash_table->locks);
@@ -685,12 +686,6 @@ g_hash_table_new_full (GHashFunc      hash_func,
     printf("Metadata not set up. Allocating hashtable on NVRAM...\n");
     g_hash_table_set_shift_from_size(hash_table, max_entries);
     // (iangneal): Allocate 3 strips in NVRAM for these three arrays.
-    size_t nblocks = NV_IDX(max_entries);
-    /*
-    hash_table->keys   = nvram_alloc_range(nblocks);
-    hash_table->values = nvram_alloc_range(nblocks);
-    hash_table->hashes = nvram_alloc_range(nblocks);
-    */
     hash_table->data   = nvram_alloc_range(nblocks);
 
     nvram_write_metadata(hash_table, max_entries);
@@ -705,6 +700,10 @@ g_hash_table_new_full (GHashFunc      hash_func,
   hash_table->dirty = -1;
   hash_table->cache = calloc(NV_IDX(max_entries), sizeof(hash_entry_t*));
   assert(hash_table->cache);
+
+  for(int i = 0; i < nblocks; ++i) {
+    hash_table->cache[i] = (hash_entry_t*)malloc(g_block_size_bytes);
+  }
 #endif
 
 
