@@ -463,6 +463,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_stop(&ts);
 
 #ifdef HASHTABLE
+  mlfs_hash_persist(nullptr, nullptr);
   cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
   cout << "Reads: " << reads << " Writes: " << writes << endl;
   //cout << "Persisting hash table..." << endl;

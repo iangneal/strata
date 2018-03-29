@@ -303,7 +303,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   uint32_t first_tombstone = 0;
   int have_tombstone = FALSE;
   uint32_t step = 0;
-  hash_entry_t buffer[BUF_SIZE];
+  hash_entry_t *buffer;
   hash_entry_t cur;
 
   /* If this happens, then the application is probably doing too much work
@@ -324,7 +324,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
 
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
-  nvram_read(hash_table, NV_IDX(node_index), buffer);
+  nvram_read(hash_table, NV_IDX(node_index), &buffer);
   cur = buffer[BUF_IDX(node_index)];
   node_hash = cur.hash;
 
@@ -362,7 +362,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
     // we need to read another block
     // TODO profile me and see how many times we actually have to do this
     if ( NV_IDX(new_idx) != NV_IDX(node_index)) {
-      nvram_read(hash_table, NV_IDX(new_idx), buffer);
+      nvram_read(hash_table, NV_IDX(new_idx), &buffer);
     }
 
     node_index = new_idx;
@@ -724,6 +724,7 @@ g_hash_table_new_full (GHashFunc      hash_func,
 
   // cache
 #ifdef HASHCACHE
+  hash_table->dirty = -1;
   hash_table->cache = malloc(sizeof(hash_entry_t*) * NV_IDX(max_entries));
   assert(hash_table->cache);
 #endif

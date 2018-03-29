@@ -13,6 +13,8 @@ if [ "$2" == "" ]; then
   exit 1
 fi
 
+make clean scrub all
+
 for b in 1 16; do
   for i in `seq 0 2`; do
     for l in `seq 0 2`; do

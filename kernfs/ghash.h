@@ -25,6 +25,10 @@
 #ifndef __G_HASH_MOD_H__
 #define __G_HASH_MOD_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // MLFS includes
 #include "global/global.h"
 #include "balloc.h"
@@ -96,6 +100,8 @@ typedef struct _GHashTable
 #ifdef HASHCACHE
   // array of blocks
   hash_entry_t **cache;
+  // dirty block
+  int dirty;
 #endif
 } GHashTable;
 
@@ -198,11 +204,11 @@ uint64_t writes;
  * Read a NVRAM block and stash the results into a user-provided buffer.
  * Used to read buckets and potentially iterate over them.
  *
- * buf -- needs to be at least g_block_size_bytes long!
+ * buf -- reference to cache page. Don't free!
  * offset -- needs to be block aligned!
  */
 static void
-nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t *buf) {
+nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t **buf) {
   struct buffer_head *bh;
   int err;
 
@@ -212,15 +218,22 @@ nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t *buf) {
 #ifdef HASHCACHE
   // if NULL, then it got invalidated or never loaded.
   if (ht->cache[offset]) {
-    memcpy((uint8_t*)buf, (uint8_t*)ht->cache[offset], g_block_size_bytes);
+    //memcpy((uint8_t*)buf, (uint8_t*)ht->cache[offset], g_block_size_bytes);
+    *buf = ht->cache[offset];
     return;
+  }
+
+  if (!ht->cache[offset]) {
+    ht->cache[offset] = (hash_entry_t*)malloc(g_block_size_bytes);
+    assert(ht->cache[offset]);
+    *buf = ht->cache[offset];
   }
 #endif
 
   bh = bh_get_sync_IO(g_root_dev, ht->data + offset, BH_NO_DATA_ALLOC);
   bh->b_offset = 0;
   bh->b_size = g_block_size_bytes;
-  bh->b_data = (uint8_t*)buf;
+  bh->b_data = (uint8_t*)ht->cache[offset];
   bh_submit_read_sync_IO(bh);
 
   // uint8_t dev, int read (enables read)
@@ -229,15 +242,6 @@ nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t *buf) {
 
   bh_release(bh);
   reads++;
-
-#ifdef HASHCACHE
-  if (!ht->cache[offset]) {
-    ht->cache[offset] = malloc(g_block_size_bytes);
-    assert(ht->cache[offset]);
-  }
-
-  memcpy((uint8_t*)ht->cache[offset], (uint8_t*)buf, g_block_size_bytes);
-#endif
 }
 
 /*
@@ -247,8 +251,8 @@ nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t *buf) {
 static void
 nvram_read_entry(GHashTable *ht, mlfs_fsblk_t idx, hash_entry_t *ret) {
   mlfs_fsblk_t offset = NV_IDX(idx);
-  hash_entry_t buf[BUF_SIZE];
-  nvram_read(ht, offset, buf);
+  hash_entry_t *buf;
+  nvram_read(ht, offset, &buf);
   *ret = buf[BUF_IDX(idx)];
 }
 /*
@@ -289,11 +293,6 @@ nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
     hash->nnodes = metadata.nnodes;
     hash->noccupied = metadata.noccupied;
     hash->data = metadata.data_start;
-    /*
-    hash->keys = metadata.keys_start;
-    hash->hashes = metadata.hashes_start;
-    hash->values = metadata.values_start;
-    */
   } else {
     // we need to do all of the allocation
     ret = 0;
@@ -316,6 +315,31 @@ nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
   return ret;
 }
 
+#ifdef HASHCACHE
+static inline void nvram_flush(GHashTable *ht) {
+  struct buffer_head *bh;
+  int ret;
+
+  if (ht->dirty >= 0) {
+    assert(ht->cache[ht->dirty]);
+    // TODO: maybe generalize for other devices.
+    bh = bh_get_sync_IO(g_root_dev, ht->data + ht->dirty, BH_NO_DATA_ALLOC);
+    assert(bh);
+
+    bh->b_data = (uint8_t*)ht->cache[ht->dirty];
+    bh->b_size = g_block_size_bytes;
+    bh->b_offset = 0;
+
+    ret = mlfs_write(bh);
+    assert(!ret);
+    bh_release(bh);
+    writes++;
+
+    ht->dirty = -1;
+  }
+}
+#endif
+
 static int
 nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
   struct buffer_head *bh;
@@ -329,11 +353,6 @@ nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
     .nnodes = hash->nnodes,
     .noccupied = hash->noccupied,
     .data_start = hash->data
-    /*
-    .keys_start = hash->keys,
-    .hashes_start = hash->hashes,
-    .values_start = hash->values
-    */
   };
 
 
@@ -396,6 +415,20 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   mlfs_fsblk_t block_addr = ht->data + NV_IDX(index);
   mlfs_fsblk_t block_offset = BUF_IDX(index) * sizeof(hash_entry_t);
 
+#ifdef HASHCACHE
+  if (ht->cache[NV_IDX(index)]) {
+    ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
+
+    if (ht->dirty >= 0 && ht->dirty != NV_IDX(index)) {
+      nvram_flush(ht);
+    }
+
+    ht->dirty = NV_IDX(index);
+
+    return;
+  }
+#endif
+
   // TODO: maybe generalize for other devices.
   bh = bh_get_sync_IO(g_root_dev, block_addr, BH_NO_DATA_ALLOC);
   assert(bh);
@@ -408,12 +441,10 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   assert(!ret);
   bh_release(bh);
   writes++;
-#ifdef HASHCACHE
-  if (ht->cache[NV_IDX(index)]) {
-    ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
-  }
-#endif
 }
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __G_HASH_MOD_H__ */
