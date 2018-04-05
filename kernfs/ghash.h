@@ -37,12 +37,17 @@ extern "C" {
 // Glib stuff
 #include "gtypes.h"
 
-typedef struct {
+// For the big hash table, mapping (inode, lblk) -> single block
+typedef struct  _hash_entry {
   mlfs_fsblk_t key;
-  //mlfs_fsblk_t hash;
   mlfs_fsblk_t value;
-  //mlfs_fsblk_t _dummy; // used for alignment for NVRAM.
+  mlfs_fsblk_t size;
 } hash_entry_t;
+
+#define KB(x)   ((size_t) (x) << 10)
+#define MB(x)   ((size_t) (x) << 20)
+
+#define RANGE_SIZE (16)
 
 #define UNUSED_HASH_VALUE 0
 #define TOMBSTONE_HASH_VALUE 1
@@ -64,6 +69,8 @@ typedef struct {
 #define BUF_SIZE (g_block_size_bytes / sizeof(hash_entry_t))
 #define BUF_IDX(x) (x % (g_block_size_bytes / sizeof(hash_entry_t)))
 #define NV_IDX(x) (x / (g_block_size_bytes / sizeof(hash_entry_t)))
+
+
 
 #define HASHCACHE
 
@@ -131,12 +138,6 @@ GHashTable* g_hash_table_new(GHashFunc  hash_func,
                              GEqualFunc key_equal_func,
                              size_t     max_entries);
 
-GHashTable* g_hash_table_new_full(GHashFunc      hash_func,
-                                  GEqualFunc     key_equal_func,
-                                  GDestroyNotify key_destroy_func,
-                                  GDestroyNotify value_destroy_func,
-                                  size_t         max_entries);
-
 void  g_hash_table_destroy(GHashTable     *hash_table);
 
 int g_hash_table_insert(GHashTable *hash_table,
@@ -191,23 +192,6 @@ void g_hash_table_unref(GHashTable *hash_table);
 
 /* Hash Functions
  */
-
-int g_str_equal(const void *v1,
-                const void *v2);
-
-unsigned g_str_hash(const void *v);
-
-
-int g_int_equal(const void *v1,
-                const void *v2);
-
-unsigned g_int_hash(const void *v);
-
-
-int g_int64_equal(const void *v1,
-                  const void *v2);
-
-unsigned g_int64_hash(const void *v);
 
 unsigned g_direct_hash (const void *v);
 

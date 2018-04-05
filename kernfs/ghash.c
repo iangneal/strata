@@ -101,85 +101,8 @@
  * following functions.
  */
 
-/**
- * GHashFunc:
- * @key: a key
- *
- * Specifies the type of the hash function which is passed to
- * g_hash_table_new() when a #GHashTable is created.
- *
- * The function is passed a key and should return a #uint32_t hash value.
- * The functions g_direct_hash(), g_int_hash() and g_str_hash() provide
- * hash functions which can be used when the key is a #void*, #int*,
- * and #char* respectively.
- *
- * g_direct_hash() is also the appropriate hash function for keys
- * of the form `GINT_TO_POINTER (n)` (or similar macros).
- *
- * A good hash functions should produce
- * hash values that are evenly distributed over a fairly large range.
- * The modulus is taken with the hash table size (a prime number) to
- * find the 'bucket' to place each key into. The function should also
- * be very fast, since it is called for each key lookup.
- *
- * Note that the hash functions provided by GLib have these qualities,
- * but are not particularly robust against manufactured keys that
- * cause hash collisions. Therefore, you should consider choosing
- * a more secure hash function when using a GHashTable with keys
- * that originate in untrusted data (such as HTTP requests).
- * Using g_str_hash() in that situation might make your application
- * vulerable to
- * [Algorithmic Complexity Attacks](https://lwn.net/Articles/474912/).
- *
- * The key to choosing a good hash is unpredictability.  Even
- * cryptographic hashes are very easy to find collisions for when the
- * remainder is taken modulo a somewhat predictable prime number.  There
- * must be an element of randomness that an attacker is unable to guess.
- *
- * Returns: the hash value corresponding to the key
- */
-
-/**
- * GHFunc:
- * @key: a key
- * @value: the value corresponding to the key
- * @user_data: user data passed to g_hash_table_foreach()
- *
- * Specifies the type of the function passed to g_hash_table_foreach().
- * It is called with each key/value pair, together with the @user_data
- * parameter which is passed to g_hash_table_foreach().
- */
-
-/**
- * GHRFunc:
- * @key: a key
- * @value: the value associated with the key
- * @user_data: user data passed to g_hash_table_remove()
- *
- * Specifies the type of the function passed to
- * g_hash_table_foreach_remove(). It is called with each key/value
- * pair, together with the @user_data parameter passed to
- * g_hash_table_foreach_remove(). It should return %TRUE if the
- * key/value pair should be removed from the #GHashTable.
- *
- * Returns: %TRUE if the key/value pair should be removed from the
- *     #GHashTable
- */
-
-/**
- * GEqualFunc:
- * @a: a value
- * @b: a value to compare with
- *
- * Specifies the type of a function used to test two values for
- * equality. The function should return %TRUE if both values are equal
- * and %FALSE otherwise.
- *
- * Returns: %TRUE if @a = @b; %FALSE otherwise
- */
 
 #define HASH_TABLE_MIN_SHIFT 3  /* 1 << 3 == 8 buckets */
-
 
 #define TRUE 1
 #define FALSE 0
@@ -621,50 +544,12 @@ GHashTable *
 g_hash_table_new (GHashFunc  hash_func,
                   GEqualFunc key_equal_func,
                   size_t     max_entries) {
-  return g_hash_table_new_full (hash_func, key_equal_func, NULL, NULL, max_entries);
-}
-
-
-/**
- * g_hash_table_new_full:
- * @hash_func: a function to create a hash value from a key
- * @key_equal_func: a function to check two keys for equality
- * @key_destroy_func: (nullable): a function to free the memory allocated for the key
- *     used when removing the entry from the #GHashTable, or %NULL
- *     if you don't want to supply such a function.
- * @value_destroy_func: (nullable): a function to free the memory allocated for the
- *     value used when removing the entry from the #GHashTable, or %NULL
- *     if you don't want to supply such a function.
- *
- * Creates a new #GHashTable like g_hash_table_new() with a reference
- * count of 1 and allows to specify functions to free the memory
- * allocated for the key and value that get called when removing the
- * entry from the #GHashTable.
- *
- * Since version 2.42 it is permissible for destroy notify functions to
- * recursively remove further items from the hash table. This is only
- * permissible if the application still holds a reference to the hash table.
- * This means that you may need to ensure that the hash table is empty by
- * calling g_hash_table_remove_all() before releasing the last reference using
- * g_hash_table_unref().
- *
- * Returns: a new #GHashTable
- */
-GHashTable *
-g_hash_table_new_full (GHashFunc      hash_func,
-                       GEqualFunc     key_equal_func,
-                       GDestroyNotify key_destroy_func,
-                       GDestroyNotify value_destroy_func,
-                       size_t         max_entries)
-{
   GHashTable *hash_table;
 
   hash_table = malloc(sizeof(*hash_table));
 
   hash_table->hash_func          = hash_func ? hash_func : g_direct_hash;
   hash_table->key_equal_func     = key_equal_func;
-  hash_table->key_destroy_func   = key_destroy_func;
-  hash_table->value_destroy_func = value_destroy_func;
   hash_table->ref_count          = 1;
   hash_table->nnodes             = 0;
   hash_table->noccupied          = 0;
@@ -1442,61 +1327,6 @@ uint32_t g_hash_table_size (GHashTable *hash_table) {
  */
 
 /**
- * g_str_equal:
- * @v1: (not nullable): a key
- * @v2: (not nullable): a key to compare with @v1
- *
- * Compares two strings for byte-by-byte equality and returns %TRUE
- * if they are equal. It can be passed to g_hash_table_new() as the
- * @key_equal_func parameter, when using non-%NULL strings as keys in a
- * #GHashTable.
- *
- * Note that this function is primarily meant as a hash table comparison
- * function. For a general-purpose, %NULL-safe string comparison function,
- * see g_strcmp0().
- *
- * Returns: %TRUE if the two keys match
- */
-int g_str_equal (const void* v1, const void* v2) {
-  const char *string1 = v1;
-  const char *string2 = v2;
-
-  return strcmp(string1, string2) == 0;
-}
-
-/**
- * g_str_hash:
- * @v: (not nullable): a string key
- *
- * Converts a string to a hash value.
- *
- * This function implements the widely used "djb" hash apparently
- * posted by Daniel Bernstein to comp.lang.c some time ago.  The 32
- * bit uint32_t hash value starts at 5381 and for each byte 'c' in
- * the string, is updated: `hash = hash * 33 + c`. This function
- * uses the signed value of each byte.
- *
- * It can be passed to g_hash_table_new() as the @hash_func parameter,
- * when using non-%NULL strings as keys in a #GHashTable.
- *
- * Note that this function may not be a perfect fit for all use cases.
- * For example, it produces some hash collisions with strings as short
- * as 2.
- *
- * Returns: a hash value corresponding to the key
- */
-uint32_t g_str_hash (const void* v) {
-  const signed char *p;
-  uint32_t h = 5381;
-
-  for (p = v; *p != '\0'; p++) {
-    h = (h << 5) + h + *p;
-  }
-
-  return h;
-}
-
-/**
  * g_direct_hash:
  * @v: (nullable): a #void* key
  *
@@ -1531,80 +1361,4 @@ uint32_t g_direct_hash (const void* v) {
  */
 int g_direct_equal (const void* v1, const void* v2) {
   return v1 == v2;
-}
-
-/**
- * g_int_equal:
- * @v1: (not nullable): a pointer to a #int key
- * @v2: (not nullable): a pointer to a #int key to compare with @v1
- *
- * Compares the two #int values being pointed to and returns
- * %TRUE if they are equal.
- * It can be passed to g_hash_table_new() as the @key_equal_func
- * parameter, when using non-%NULL pointers to integers as keys in a
- * #GHashTable.
- *
- * Note that this function acts on pointers to #int, not on #int
- * directly: if your hash table's keys are of the form
- * `GINT_TO_POINTER (n)`, use g_direct_equal() instead.
- *
- * Returns: %TRUE if the two keys match.
- */
-int g_int_equal (const void* v1, const void* v2) {
-  return *((const int*) v1) == *((const int*) v2);
-}
-
-/**
- * g_int_hash:
- * @v: (not nullable): a pointer to a #int key
- *
- * Converts a pointer to a #int to a hash value.
- * It can be passed to g_hash_table_new() as the @hash_func parameter,
- * when using non-%NULL pointers to integer values as keys in a #GHashTable.
- *
- * Note that this function acts on pointers to #int, not on #int
- * directly: if your hash table's keys are of the form
- * `GINT_TO_POINTER (n)`, use g_direct_hash() instead.
- *
- * Returns: a hash value corresponding to the key.
- */
-uint32_t g_int_hash (const void* v) {
-  return *(const int*) v;
-}
-
-/**
- * g_int64_equal:
- * @v1: (not nullable): a pointer to a #int64 key
- * @v2: (not nullable): a pointer to a #int64 key to compare with @v1
- *
- * Compares the two #int64 values being pointed to and returns
- * %TRUE if they are equal.
- * It can be passed to g_hash_table_new() as the @key_equal_func
- * parameter, when using non-%NULL pointers to 64-bit integers as keys in a
- * #GHashTable.
- *
- * Returns: %TRUE if the two keys match.
- *
- * Since: 2.22
- */
-int g_int64_equal (const void* v1, const void* v2) {
-  return *((const int64_t*) v1) == *((const int64_t*) v2);
-}
-
-/**
- * g_int64_hash:
- * @v: (not nullable): a pointer to a #int64 key
- *
- * Converts a pointer to a #int64 to a hash value.
- *
- * It can be passed to g_hash_table_new() as the @hash_func parameter,
- * when using non-%NULL pointers to 64-bit integer values as keys in a
- * #GHashTable.
- *
- * Returns: a hash value corresponding to the key.
- *
- * Since: 2.22
- */
-uint32_t g_int64_hash (const void* v) {
-  return (uint32_t) *(const int64_t*) v;
 }
