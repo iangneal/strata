@@ -10,16 +10,27 @@
 // (iangneal): Global hash table for all of NVRAM. Each inode has a point to
 // this one hash table just for abstraction of the inode interface.
 static GHashTable *ghash = NULL;
+static GHashTable *gsuper = NULL;
 
 void init_hash(struct inode *inode) {
   //TODO: init in NVRAM.
   if (!ghash) {
     printf("INIT HASH!!!\n");
     struct super_block *sb = get_inode_sb(inode->dev, inode);
-    ghash = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks);
+    // 1 block table
+    ghash = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks, 1);
     if (!ghash) {
       panic("Failed to initialize inode hashtable\n");
     }
+
+    // Range table
+#if 0
+    gsuper = g_hash_table_new(g_direct_hash, g_direct_equal,
+        sb->num_blocks, RANGE_SIZE);
+    if (!gsuper) {
+      panic("Failed to initialize inode hashtable\n");
+    }
+#endif
   }
 }
 

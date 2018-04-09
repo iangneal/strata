@@ -47,7 +47,10 @@ typedef struct  _hash_entry {
 #define KB(x)   ((size_t) (x) << 10)
 #define MB(x)   ((size_t) (x) << 20)
 
-#define RANGE_SIZE (16)
+#define RANGE_SIZE (1 << 4) // 16
+#define RANGE_BITS (RANGE_SIZE - 1)
+#define RANGE_MASK (~RANGE_BITS)
+#define RANGE_KEY(i, l) ( (((uint64_t)(i)) << 32) | ((l) & RANGE_MASK))
 
 #define UNUSED_HASH_VALUE 0
 #define TOMBSTONE_HASH_VALUE 1
@@ -77,9 +80,6 @@ typedef struct  _hash_entry {
 // This is the hash table meta-data that is persisted to NVRAM, that we may read
 // it and know everything we need to know in order to reconstruct it in memory.
 struct dhashtable_meta {
-  // To check if it's been initialized.
-  uint32_t magic1;
-  uint32_t magic2;
   // Metadata for the in-memory state.
   gint size;
   gint mod;
@@ -88,33 +88,25 @@ struct dhashtable_meta {
   gint noccupied;
   // Metadata about the on-disk state.
   mlfs_fsblk_t nvram_size;
-  //mlfs_fsblk_t keys_start;
-  //mlfs_fsblk_t hashes_start;
-  //mlfs_fsblk_t values_start;
+  mlfs_fsblk_t range_size;
   mlfs_fsblk_t data_start;
 };
 
-typedef struct _GHashTable
-{
+typedef struct _GHashTable {
   int             size;
   int             mod;
   unsigned        mask;
   int             nnodes;
   int             noccupied;  /* nnodes + tombstones */
 
-  //mlfs_fsblk_t     keys;
-  //mlfs_fsblk_t     hashes;
-  //mlfs_fsblk_t     values;
   mlfs_fsblk_t     data;
   mlfs_fsblk_t     nvram_size;
+  size_t           range_size;
   pthread_mutex_t *mutexes;
 
   GHashFunc        hash_func;
   GEqualFunc       key_equal_func;
   int              ref_count;
-
-  GDestroyNotify   key_destroy_func;
-  GDestroyNotify   value_destroy_func;
 
   // concurrency
   pthread_rwlock_t *locks;
@@ -136,7 +128,8 @@ typedef int (*GHRFunc) (void* key,
 
 GHashTable* g_hash_table_new(GHashFunc  hash_func,
                              GEqualFunc key_equal_func,
-                             size_t     max_entries);
+                             size_t     max_entries,
+                             size_t     range_size);
 
 void  g_hash_table_destroy(GHashTable     *hash_table);
 
@@ -202,14 +195,16 @@ uint64_t reads;
 uint64_t writes;
 
 /*
- * Read a NVRAM block and stash the results into a user-provided buffer.
+ * Read a NVRAM block and give the users a reference to our cache (saves a
+ * memcpy).
  * Used to read buckets and potentially iterate over them.
  *
  * buf -- reference to cache page. Don't free!
  * offset -- needs to be block aligned!
+ * force -- refresh the cache from NVRAM.
  */
 static void
-nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t **buf) {
+nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t **buf, bool force) {
   struct buffer_head *bh;
   int err;
 
@@ -218,14 +213,16 @@ nvram_read(GHashTable *ht, mlfs_fsblk_t offset, hash_entry_t **buf) {
    */
 #ifdef HASHCACHE
   // if NULL, then it got invalidated or never loaded.
-  if (ht->cache[offset]) {
-    //memcpy((uint8_t*)buf, (uint8_t*)ht->cache[offset], g_block_size_bytes);
-    *buf = ht->cache[offset];
-    return;
-  } else {
-    ht->cache[offset] = (hash_entry_t*)malloc(g_block_size_bytes);
-    assert(ht->cache[offset]);
-    *buf = ht->cache[offset];
+  if (!force) {
+    if (ht->cache[offset]) {
+      //memcpy((uint8_t*)buf, (uint8_t*)ht->cache[offset], g_block_size_bytes);
+      *buf = ht->cache[offset];
+      return;
+    } else {
+      ht->cache[offset] = (hash_entry_t*)malloc(g_block_size_bytes);
+      assert(ht->cache[offset]);
+      *buf = ht->cache[offset];
+    }
   }
 #endif
 
@@ -251,7 +248,7 @@ static void
 nvram_read_entry(GHashTable *ht, mlfs_fsblk_t idx, hash_entry_t *ret) {
   mlfs_fsblk_t offset = NV_IDX(idx);
   hash_entry_t *buf;
-  nvram_read(ht, offset, &buf);
+  nvram_read(ht, offset, &buf, 0);
   *ret = buf[BUF_IDX(idx)];
 }
 /*
@@ -262,15 +259,14 @@ nvram_read_entry(GHashTable *ht, mlfs_fsblk_t idx, hash_entry_t *ret) {
  * Returns 1 on success, 0 on failure.
  */
 static int
-nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
+nvram_read_metadata(GHashTable *hash, mlfs_fsblk_t location) {
   struct buffer_head *bh;
   struct dhashtable_meta metadata;
-  int err;
-  int ret;
+  int err, ret = 0;
 
   // TODO: maybe generalize this.
   // size - 1 for the last block (where we will allocate the hashtable)
-  bh = bh_get_sync_IO(g_root_dev, nvram_size - 1, BH_NO_DATA_ALLOC);
+  bh = bh_get_sync_IO(g_root_dev, location, BH_NO_DATA_ALLOC);
   bh->b_size = sizeof(metadata);
   bh->b_data = (uint8_t*)&metadata;
   bh->b_offset = 0;
@@ -281,35 +277,21 @@ nvram_read_metadata(GHashTable *hash, size_t nvram_size) {
   assert(!err);
 
   // now check the actual metadata
-
   if (metadata.size > 0) {
     ret = 1;
     assert(hash->nvram_size == metadata.nvram_size);
+    assert(hash->range_size == metadata.range_size);
     // reconsititute the rest of the hashtable from
     hash->size = metadata.size;
+    hash->range_size = metadata.range_size;
     hash->mod = metadata.mod;
     hash->mask = metadata.mask;
     hash->nnodes = metadata.nnodes;
     hash->noccupied = metadata.noccupied;
     hash->data = metadata.data_start;
-  } else {
-    // we need to do all of the allocation
-    ret = 0;
-    // first, need to actuall allocate the last block for the hashtable
-    // TODO: GOAL is unused -- should fix
-    /*
-    err = mlfs_new_blocks(super, &block, count, 0, 0, DATA, 0);
-    if (err < 0) {
-      fprintf(stderr, "Error: could not allocate new blocks: %d\n", err);
-    }
-
-    assert(err >= 0);
-    assert(err == count);
-    */
   }
 
   bh_release(bh);
-
 
   return ret;
 }
@@ -340,13 +322,15 @@ static inline void nvram_flush(GHashTable *ht) {
 #endif
 
 static int
-nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
+nvram_write_metadata(GHashTable *hash, mlfs_fsblk_t location) {
   struct buffer_head *bh;
+  struct super_block *super = sb[g_root_dev];
   int ret;
   // Set up the hash table metadata
   struct dhashtable_meta metadata = {
     .nvram_size = hash->nvram_size,
     .size = hash->size,
+    .range_size = hash->range_size,
     .mod = hash->mod,
     .mask = hash->mask,
     .nnodes = hash->nnodes,
@@ -356,7 +340,7 @@ nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
 
 
   // TODO: maybe generalize for other devices.
-  bh = bh_get_sync_IO(g_root_dev, nvram_size - 1, BH_NO_DATA_ALLOC);
+  bh = bh_get_sync_IO(g_root_dev, location, BH_NO_DATA_ALLOC);
   assert(bh);
 
   bh->b_size = sizeof(metadata);
@@ -367,12 +351,16 @@ nvram_write_metadata(GHashTable *hash, size_t nvram_size) {
 
   assert(!ret);
   bh_release(bh);
+
+  // Actually mark block as allocated.
+  bitmap_bits_set_range(super->s_blk_bitmap, location, 1);
+  super->used_blocks += 1;
 }
 
 static mlfs_fsblk_t
 nvram_alloc_range(size_t count) {
   int err;
-  // TODO: maybe generalize this.
+  // TODO: maybe generalize this for other devices.
   struct super_block *super = sb[g_root_dev];
   mlfs_fsblk_t block;
 
@@ -381,6 +369,9 @@ nvram_alloc_range(size_t count) {
     fprintf(stderr, "Error: could not allocate new blocks: %d\n", err);
   }
 
+  // Mark superblock bits
+  bitmap_bits_set_range(super->s_blk_bitmap, block, count);
+  super->used_blocks += count;
 #if 0
   printf("allocing range: %lu blocks (block size: %u, shift = %u)\n", count,
       g_block_size_bytes, g_block_size_shift);

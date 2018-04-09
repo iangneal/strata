@@ -112,8 +112,7 @@
  * then works modulo 2^n. The prime modulo is necessary to get a
  * good distribution with poor hash functions.
  */
-static const int prime_mod [] =
-{
+static const int prime_mod [] = {
   1,          /* For 1 << 0 */
   2,
   3,
@@ -165,8 +164,7 @@ g_hash_table_set_shift (GHashTable *hash_table, int shift) {
 }
 
 static int
-g_hash_table_find_closest_shift (int n)
-{
+g_hash_table_find_closest_shift (int n) {
   int i;
 
   for (i = 0; n; i++) {
@@ -240,7 +238,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
 
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
-  nvram_read(hash_table, NV_IDX(node_index), &buffer);
+  nvram_read(hash_table, NV_IDX(node_index), &buffer, FALSE);
   cur = buffer[BUF_IDX(node_index)];
 
   while (!IS_EMPTY(cur.value)) {
@@ -264,7 +262,7 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
     // we need to read another block
     // TODO profile me and see how many times we actually have to do this
     if (NV_IDX(new_idx) != NV_IDX(node_index)) {
-      nvram_read(hash_table, NV_IDX(new_idx), &buffer);
+      nvram_read(hash_table, NV_IDX(new_idx), &buffer, FALSE);
     }
 
     node_index = new_idx;
@@ -417,81 +415,6 @@ g_hash_table_remove_all_nodes (GHashTable *hash_table,
 }
 
 /*
- * g_hash_table_resize:
- * @hash_table: our #GHashTable
- *
- * Resizes the hash table to the optimal size based on the number of
- * nodes currently held. If you call this function then a resize will
- * occur, even if one does not need to occur.
- * Use g_hash_table_maybe_resize() instead.
- *
- * This function may "resize" the hash table to its current size, with
- * the side effect of cleaning up tombstones and otherwise optimizing
- * the probe sequences.
- */
-static void
-g_hash_table_resize (GHashTable *hash_table) {
-  void* *new_keys;
-  void* *new_values;
-  uint32_t *new_hashes;
-  int old_size;
-  int i;
-
-  // (iangneal): Hash table is to be PRE-ALLOCATED.
-  assert(0);
-#if 0
-  old_size = hash_table->size;
-  g_hash_table_set_shift_from_size (hash_table, hash_table->nnodes * 2);
-
-  //new_keys = g_new0 (void*, hash_table->size);
-  new_keys = calloc(hash_table->size, sizeof(void*));
-  if (hash_table->keys == hash_table->values) {
-    new_values = new_keys;
-  } else {
-    //new_values = g_new0 (void*, hash_table->size);
-    new_values = calloc(hash_table->size, sizeof(void*));
-  }
-
-  //new_hashes = g_new0 (uint32_t, hash_table->size);
-  new_hashes = calloc(hash_table->size, sizeof(uint32_t));
-
-  for (i = 0; i < old_size; i++) {
-    uint32_t node_hash = hash_table->hashes[i];
-    uint32_t hash_val;
-    uint32_t step = 0;
-
-    if (!HASH_IS_REAL (node_hash))
-      continue;
-
-    hash_val = node_hash % hash_table->mod;
-
-    while (!HASH_IS_UNUSED (new_hashes[hash_val])) {
-      step++;
-      hash_val += step;
-      hash_val &= hash_table->mask;
-    }
-
-    new_hashes[hash_val] = hash_table->hashes[i];
-    new_keys[hash_val] = hash_table->keys[i];
-    new_values[hash_val] = hash_table->values[i];
-  }
-
-  if (hash_table->keys != hash_table->values) {
-    free (hash_table->values);
-  }
-
-  free (hash_table->keys);
-  free (hash_table->hashes);
-
-  hash_table->keys = new_keys;
-  hash_table->values = new_values;
-  hash_table->hashes = new_hashes;
-
-  hash_table->noccupied = hash_table->nnodes;
-#endif
-}
-
-/*
  * g_hash_table_maybe_resize:
  * @hash_table: our #GHashTable
  *
@@ -543,7 +466,8 @@ g_hash_table_maybe_resize (GHashTable *hash_table) {
 GHashTable *
 g_hash_table_new (GHashFunc  hash_func,
                   GEqualFunc key_equal_func,
-                  size_t     max_entries) {
+                  size_t     max_entries,
+                  size_t     range_size) {
   GHashTable *hash_table;
 
   hash_table = malloc(sizeof(*hash_table));
@@ -554,26 +478,32 @@ g_hash_table_new (GHashFunc  hash_func,
   hash_table->nnodes             = 0;
   hash_table->noccupied          = 0;
   hash_table->nvram_size         = max_entries;
+  hash_table->range_size         = range_size;
 
-  size_t nblocks = NV_IDX(max_entries);
+  size_t scaled_size = max_entries / range_size;
+  size_t nblocks = NV_IDX(scaled_size);
+
   // initialize read-writer locks
-  hash_table->locks = malloc(max_entries * sizeof(pthread_rwlock_t));
+  hash_table->locks = malloc(scaled_size * sizeof(pthread_rwlock_t));
   assert(hash_table->locks);
-  for (size_t i = 0; i < max_entries; ++i) {
+  for (size_t i = 0; i < scaled_size; ++i) {
     int err = pthread_rwlock_init(hash_table->locks + i, NULL);
-    if (err) panic("Could not init rwlock!");
+    if (err) {
+      panic("Could not init rwlock!");
+    }
   }
+
   // init metadata lock
   hash_table->metalock = malloc(sizeof(pthread_mutex_t));
   pthread_mutex_init(hash_table->metalock, NULL);
 
-  if (!nvram_read_metadata(hash_table, max_entries)) {
+  if (!nvram_read_metadata(hash_table, max_entries - 1)) {
     printf("Metadata not set up. Allocating hashtable on NVRAM...\n");
-    g_hash_table_set_shift_from_size(hash_table, max_entries);
+    g_hash_table_set_shift_from_size(hash_table, scaled_size);
     // (iangneal): Allocate 3 strips in NVRAM for these three arrays.
-    hash_table->data   = nvram_alloc_range(nblocks);
+    hash_table->data = nvram_alloc_range(nblocks);
 
-    nvram_write_metadata(hash_table, max_entries);
+    nvram_write_metadata(hash_table, max_entries - 1);
     printf("max_entries: %lu, sizeof %lu, nblocks: %lu\n", max_entries,
         sizeof(hash_entry_t), nblocks);
   } else {
@@ -583,11 +513,15 @@ g_hash_table_new (GHashFunc  hash_func,
   // cache
 #ifdef HASHCACHE
   hash_table->dirty = -1;
-  hash_table->cache = calloc(NV_IDX(max_entries), sizeof(hash_entry_t*));
+  hash_table->cache = calloc(NV_IDX(scaled_size), sizeof(hash_entry_t*));
   assert(hash_table->cache);
 
-  for(int i = 0; i < nblocks; ++i) {
+  hash_entry_t *unused;
+
+  for (int i = 0; i < nblocks; ++i) {
     hash_table->cache[i] = (hash_entry_t*)malloc(g_block_size_bytes);
+    // load from NVRAM
+    nvram_read(hash_table, i, &unused, 1);
   }
 #endif
 
@@ -624,77 +558,17 @@ g_hash_table_insert_node (GHashTable    *hash_table,
 {
   int already_exists;
   hash_entry_t ent;
-  //mlfs_fsblk_t old_hash;
-  mlfs_fsblk_t key_to_free = 0;
-  mlfs_fsblk_t value_to_free = 0;
 
   //pthread_rwlock_wrlock(hash_table->locks + node_index);
   //pthread_mutex_lock(hash_table->metalock);
 
   nvram_read_entry(hash_table, node_index, &ent);
   already_exists = IS_VALID(ent.value);
-  //old_hash = ent.hash;
 
-  /* Proceed in three steps.  First, deal with the key because it is the
-   * most complicated.  Then consider if we need to split the table in
-   * two (because writing the value will result in the set invariant
-   * becoming broken).  Then deal with the value.
-   *
-   * There are three cases for the key:
-   *
-   *  - entry already exists in table, reusing key:
-   *    free the just-passed-in new_key and use the existing value
-   *
-   *  - entry already exists in table, not reusing key:
-   *    free the entry in the table, use the new key
-   *
-   *  - entry not already in table:
-   *    use the new key, free nothing
-   *
-   * We update the hash at the same time...
-   */
-  if (already_exists) {
-    /* Note: we must record the old value before writing the new key
-     * because we might change the value in the event that the two
-     * arrays are shared.
-     */
-    //value_to_free = nvram_read_entry(hash_table->values, node_index);
-    value_to_free = ent.value;
+  ent.key = new_key;
+  ent.value = new_value;
+  nvram_update(hash_table, node_index, &ent);
 
-    if (keep_new_key) {
-      //key_to_free = nvram_read_entry(hash_table->keys, node_index);
-      key_to_free = ent.key;
-      //ent.hash = key_hash;
-      ent.key = new_key;
-      ent.value = new_value;
-      nvram_update(hash_table, node_index, &ent);
-    } else {
-      key_to_free = new_key;
-    }
-  } else {
-    //nvram_update(hash_table->hashes, node_index, key_hash);
-    //nvram_update(hash_table->keys, node_index, new_key);
-    //ent.hash = key_hash;
-    ent.key = new_key;
-    ent.value = new_value;
-    nvram_update(hash_table, node_index, &ent);
-  }
-
-  /* Step two: check if the value that we are about to write to the
-   * table is the same as the key in the same position.  If it's not,
-   * split the table.
-   */
-#if 0
-  if (unlikely (hash_table->keys == hash_table->values &&
-                hash_table->keys[node_index] != new_value)) {
-    //hash_table->values = g_memdup (hash_table->keys, sizeof (void*) * hash_table->size);
-    hash_table->values = malloc(sizeof(void*) * hash_table->size);
-    memcpy(hash_table->values, hash_table->keys, sizeof(void*) * hash_table->size);
-  }
-#endif
-
-  /* Step 3: Actually do the write */
-  //nvram_update(hash_table->values, node_index, new_value);
 
   /* Now, the bookkeeping... */
   if (!already_exists) {
@@ -707,15 +581,6 @@ g_hash_table_insert_node (GHashTable    *hash_table,
     }
     */
   }
-
-#if 0
-  if (already_exists) {
-    if (hash_table->key_destroy_func && !reusing_key)
-      (* hash_table->key_destroy_func) (key_to_free);
-    if (hash_table->value_destroy_func)
-      (* hash_table->value_destroy_func) (value_to_free);
-  }
-#endif
 
   //nvram_write_metadata(hash_table, hash_table->size);
 
