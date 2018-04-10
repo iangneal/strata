@@ -235,17 +235,12 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   *hash_return = hash_value;
 
   node_index = hash_value % hash_table->mod;
-
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
   nvram_read(hash_table, NV_IDX(node_index), &buffer, FALSE);
   cur = buffer[BUF_IDX(node_index)];
 
   while (!IS_EMPTY(cur.value)) {
-    /* We first check if our full hash values
-     * are equal so we can avoid calling the full-blown
-     * key equality function in most cases.
-     */
     if (cur.key == key && IS_VALID(cur.value)) {
       *ent_return = cur;
       return node_index;
@@ -316,105 +311,6 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
 }
 
 /*
- * g_hash_table_remove_all_nodes:
- * @hash_table: our #GHashTable
- * @notify: %TRUE if the destroy notify handlers are to be called
- *
- * Removes all nodes from the table.  Since this may be a precursor to
- * freeing the table entirely, no resize is performed.
- *
- * If @notify is %TRUE then the destroy notify functions are called
- * for the key and value of the hash node.
- */
-static void
-g_hash_table_remove_all_nodes (GHashTable *hash_table,
-                               int         notify,
-                               int         destruction)
-{
-  int i;
-  void* key;
-  void* value;
-  int old_size;
-  void* *old_keys;
-  void* *old_values;
-  uint32_t    *old_hashes;
-
-  assert(0);
-  /* If the hash table is already empty, there is nothing to be done. */
-  if (hash_table->nnodes == 0)
-    return;
-
-  hash_table->nnodes = 0;
-  hash_table->noccupied = 0;
-
-  //nvram_write_metadata(hash_table, hash_table->size);
-
-#if 0
-  if (!notify ||
-      (hash_table->key_destroy_func == NULL &&
-       hash_table->value_destroy_func == NULL)) {
-    if (!destruction) {
-      memset (hash_table->hashes, 0, hash_table->size * sizeof (uint32_t));
-      memset (hash_table->keys, 0, hash_table->size * sizeof (void*));
-      memset (hash_table->values, 0, hash_table->size * sizeof (void*));
-    }
-
-    return;
-  }
-
-  /* Keep the old storage space around to iterate over it. */
-  old_size   = hash_table->size;
-  old_keys   = hash_table->keys;
-  old_values = hash_table->values;
-  old_hashes = hash_table->hashes;
-
-  /* Now create a new storage space; If the table is destroyed we can use the
-   * shortcut of not creating a new storage. This saves the allocation at the
-   * cost of not allowing any recursive access.
-   * However, the application doesn't own any reference anymore, so access
-   * is not allowed. If accesses are done, then either an assert or crash
-   * *will* happen. */
-  g_hash_table_set_shift (hash_table, HASH_TABLE_MIN_SHIFT);
-  if (!destruction) {
-    hash_table->keys   = calloc(hash_table->size, sizeof(void*));
-    hash_table->values = hash_table->keys;
-    hash_table->hashes = calloc(hash_table->size, sizeof(uint32_t));
-  } else {
-    hash_table->keys   = NULL;
-    hash_table->values = NULL;
-    hash_table->hashes = NULL;
-  }
-
-  for (i = 0; i < old_size; i++) {
-    if (HASH_IS_REAL (old_hashes[i])) {
-      key = old_keys[i];
-      value = old_values[i];
-
-      old_hashes[i] = UNUSED_HASH_VALUE;
-      old_keys[i] = NULL;
-      old_values[i] = NULL;
-
-      if (hash_table->key_destroy_func != NULL) {
-        hash_table->key_destroy_func(key);
-      }
-
-      if (hash_table->value_destroy_func != NULL) {
-        hash_table->value_destroy_func(value);
-      }
-    }
-  }
-
-  /* Destroy old storage space. */
-  if (old_keys != old_values) {
-    free(old_values);
-  }
-
-  free(old_keys);
-  free(old_hashes);
-#endif
-}
-
-/*
  * g_hash_table_maybe_resize:
  * @hash_table: our #GHashTable
  *
@@ -464,10 +360,11 @@ g_hash_table_maybe_resize (GHashTable *hash_table) {
  * Returns: a new #GHashTable
  */
 GHashTable *
-g_hash_table_new (GHashFunc  hash_func,
-                  GEqualFunc key_equal_func,
-                  size_t     max_entries,
-                  size_t     range_size) {
+g_hash_table_new (GHashFunc    hash_func,
+                  GEqualFunc   key_equal_func,
+                  size_t       max_entries,
+                  size_t       range_size,
+                  mlfs_fsblk_t metadata_location) {
   GHashTable *hash_table;
 
   hash_table = malloc(sizeof(*hash_table));
@@ -481,7 +378,15 @@ g_hash_table_new (GHashFunc  hash_func,
   hash_table->range_size         = range_size;
 
   size_t scaled_size = max_entries / range_size;
+  if (max_entries % range_size) {
+    scaled_size += range_size;
+  }
+
   size_t nblocks = NV_IDX(scaled_size);
+  if (BUF_IDX(nblocks)) {
+    // Partial block.
+    nblocks++;
+  }
 
   // initialize read-writer locks
   hash_table->locks = malloc(scaled_size * sizeof(pthread_rwlock_t));
@@ -497,13 +402,13 @@ g_hash_table_new (GHashFunc  hash_func,
   hash_table->metalock = malloc(sizeof(pthread_mutex_t));
   pthread_mutex_init(hash_table->metalock, NULL);
 
-  if (!nvram_read_metadata(hash_table, max_entries - 1)) {
+  if (!nvram_read_metadata(hash_table, metadata_location)) {
     printf("Metadata not set up. Allocating hashtable on NVRAM...\n");
     g_hash_table_set_shift_from_size(hash_table, scaled_size);
     // (iangneal): Allocate 3 strips in NVRAM for these three arrays.
     hash_table->data = nvram_alloc_range(nblocks);
 
-    nvram_write_metadata(hash_table, max_entries - 1);
+    nvram_write_metadata(hash_table, metadata_location);
     printf("max_entries: %lu, sizeof %lu, nblocks: %lu\n", max_entries,
         sizeof(hash_entry_t), nblocks);
   } else {
@@ -553,8 +458,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
                           uint32_t       key_hash,
                           mlfs_fsblk_t   new_key,
                           mlfs_fsblk_t   new_value,
-                          int            keep_new_key,
-                          int            reusing_key)
+                          mlfs_fsblk_t   new_range)
 {
   int already_exists;
   hash_entry_t ent;
@@ -567,6 +471,7 @@ g_hash_table_insert_node (GHashTable    *hash_table,
 
   ent.key = new_key;
   ent.value = new_value;
+  ent.size = new_range;
   nvram_update(hash_table, node_index, &ent);
 
 
@@ -590,50 +495,6 @@ g_hash_table_insert_node (GHashTable    *hash_table,
 }
 
 /**
- * g_hash_table_ref:
- * @hash_table: a valid #GHashTable
- *
- * Atomically increments the reference count of @hash_table by one.
- * This function is MT-safe and may be called from any thread.
- *
- * Returns: the passed in #GHashTable
- *
- * Since: 2.10
- */
-GHashTable *
-g_hash_table_ref (GHashTable *hash_table)
-{
-  assert(hash_table != NULL);
-
-  __atomic_add_fetch(&hash_table->ref_count, 1, __ATOMIC_SEQ_CST);
-  //g_atomic_int_inc (&hash_table->ref_count);
-
-  return hash_table;
-}
-
-/**
- * g_hash_table_unref:
- * @hash_table: a valid #GHashTable
- *
- * Atomically decrements the reference count of @hash_table by one.
- * If the reference count drops to 0, all keys and values will be
- * destroyed, and all memory allocated by the hash table is released.
- * This function is MT-safe and may be called from any thread.
- *
- * Since: 2.10
- */
-void
-g_hash_table_unref (GHashTable *hash_table)
-{
-  assert (hash_table != NULL);
-
-  if (__atomic_sub_fetch(&hash_table->ref_count, 1, __ATOMIC_SEQ_CST) == 0) {
-    // Don't call this function!
-    assert(0);
-  }
-}
-
-/**
  * g_hash_table_destroy:
  * @hash_table: a #GHashTable
  *
@@ -651,9 +512,6 @@ g_hash_table_destroy (GHashTable *hash_table)
     int err = pthread_rwlock_destroy(hash_table->locks + i);
     if (err) panic("Could not destroy rwlock!");
   }
-
-  g_hash_table_remove_all (hash_table);
-  g_hash_table_unref (hash_table);
 }
 
 /**
@@ -668,7 +526,8 @@ g_hash_table_destroy (GHashTable *hash_table)
  *
  * Returns: (nullable): the associated value, or %NULL if the key is not found
  */
-mlfs_fsblk_t g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key) {
+void g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key,
+    mlfs_fsblk_t *val, mlfs_fsblk_t *size) {
   uint32_t node_index;
   uint32_t hash_return;
   hash_entry_t ent;
@@ -679,57 +538,10 @@ mlfs_fsblk_t g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key) {
 
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
-  mlfs_fsblk_t val = !IS_TOMBSTONE(ent.value) ? ent.value : 0;
+  *val = !IS_TOMBSTONE(ent.value) ? ent.value : 0;
+  *size = ent.size;
 
   //pthread_rwlock_unlock(hash_table->locks + node_index);
-
-  return val;
-}
-
-/**
- * g_hash_table_lookup_extended:
- * @hash_table: a #GHashTable
- * @lookup_key: the key to look up
- * @orig_key: (out) (optional): return location for the original key
- * @value: (out) (optional) (nullable): return location for the value associated
- * with the key
- *
- * Looks up a key in the #GHashTable, returning the original key and the
- * associated value and a #int which is %TRUE if the key was found. This
- * is useful if you need to free the memory allocated for the original key,
- * for example before calling g_hash_table_remove().
- *
- * You can actually pass %NULL for @lookup_key to test
- * whether the %NULL key exists, provided the hash and equal functions
- * of @hash_table are %NULL-safe.
- *
- * Returns: %TRUE if the key was found in the #GHashTable
- */
-int
-g_hash_table_lookup_extended (GHashTable    *hash_table,
-                              const void*  lookup_key,
-                              void*      *orig_key,
-                              void*      *value)
-{
-  uint32_t node_index;
-  uint32_t node_hash;
-
-  assert(hash_table != NULL);
-  assert(0); // don't call me
-#if 0
-  node_index = g_hash_table_lookup_node (hash_table, lookup_key, &node_hash);
-
-  if (!HASH_IS_REAL (hash_table->hashes[node_index]))
-    return FALSE;
-
-  if (orig_key)
-    *orig_key = hash_table->keys[node_index];
-
-  if (value)
-    *value = hash_table->values[node_index];
-
-#endif
-  return TRUE;
 }
 
 /*
@@ -751,10 +563,10 @@ g_hash_table_lookup_extended (GHashTable    *hash_table,
  * Returns: %TRUE if the key did not exist yet
  */
 static int
-g_hash_table_insert_internal (GHashTable *hash_table,
+g_hash_table_insert_internal (GHashTable     *hash_table,
                               mlfs_fsblk_t    key,
                               mlfs_fsblk_t    value,
-                              int    keep_new_key)
+                              mlfs_fsblk_t    size)
 {
   hash_entry_t ent;
   uint32_t node_index;
@@ -764,7 +576,7 @@ g_hash_table_insert_internal (GHashTable *hash_table,
   node_index = g_hash_table_lookup_node (hash_table, key, &ent, &hash);
 
   return g_hash_table_insert_node (hash_table, node_index, hash, key,
-      value, keep_new_key, FALSE);
+      value, size);
 }
 
 /**
@@ -785,11 +597,12 @@ g_hash_table_insert_internal (GHashTable *hash_table,
  * Returns: %TRUE if the key did not exist yet
  */
 int
-g_hash_table_insert (GHashTable *hash_table,
+g_hash_table_insert (GHashTable     *hash_table,
                      mlfs_fsblk_t    key,
-                     mlfs_fsblk_t    value)
+                     mlfs_fsblk_t    value,
+                     mlfs_fsblk_t    size)
 {
-  return g_hash_table_insert_internal (hash_table, key, value, FALSE);
+  return g_hash_table_insert_internal (hash_table, key, value, size);
 }
 
 /**
@@ -921,201 +734,7 @@ g_hash_table_remove (GHashTable    *hash_table,
   return g_hash_table_remove_internal (hash_table, key, TRUE);
 }
 
-/**
- * g_hash_table_steal:
- * @hash_table: a #GHashTable
- * @key: the key to remove
- *
- * Removes a key and its associated value from a #GHashTable without
- * calling the key and value destroy functions.
- *
- * Returns: %TRUE if the key was found and removed from the #GHashTable
- */
-int
-g_hash_table_steal (GHashTable    *hash_table,
-                    mlfs_fsblk_t  key)
-{
-  return g_hash_table_remove_internal (hash_table, key, FALSE);
-}
 
-/**
- * g_hash_table_remove_all:
- * @hash_table: a #GHashTable
- *
- * Removes all keys and their associated values from a #GHashTable.
- *
- * If the #GHashTable was created using g_hash_table_new_full(),
- * the keys and values are freed using the supplied destroy functions,
- * otherwise you have to make sure that any dynamically allocated
- * values are freed yourself.
- *
- * Since: 2.12
- */
-void
-g_hash_table_remove_all (GHashTable *hash_table)
-{
-  assert (hash_table != NULL);
-
-  g_hash_table_remove_all_nodes (hash_table, TRUE, FALSE);
-}
-
-/**
- * g_hash_table_steal_all:
- * @hash_table: a #GHashTable
- *
- * Removes all keys and their associated values from a #GHashTable
- * without calling the key and value destroy functions.
- *
- * Since: 2.12
- */
-void
-g_hash_table_steal_all (GHashTable *hash_table)
-{
-  assert (hash_table != NULL);
-
-  g_hash_table_remove_all_nodes (hash_table, FALSE, FALSE);
-}
-
-/*
- * g_hash_table_foreach_remove_or_steal:
- * @hash_table: a #GHashTable
- * @func: the user's callback function
- * @user_data: data for @func
- * @notify: %TRUE if the destroy notify handlers are to be called
- *
- * Implements the common logic for g_hash_table_foreach_remove()
- * and g_hash_table_foreach_steal().
- *
- * Iterates over every node in the table, calling @func with the key
- * and value of the node (and @user_data). If @func returns %TRUE the
- * node is removed from the table.
- *
- * If @notify is true then the destroy notify handlers will be called
- * for each removed node.
- */
-static uint32_t
-g_hash_table_foreach_remove_or_steal (GHashTable *hash_table,
-                                      GHRFunc     func,
-                                      void*    user_data,
-                                      int    notify)
-{
-  uint32_t deleted = 0;
-  int i;
-
-  assert(0); // don't call me
-
-#if 0
-
-  for (i = 0; i < hash_table->size; i++) {
-    uint32_t node_hash = hash_table->hashes[i];
-    void* node_key = hash_table->keys[i];
-    void* node_value = hash_table->values[i];
-
-    if (HASH_IS_REAL (node_hash) &&
-        (* func) (node_key, node_value, user_data)) {
-      g_hash_table_remove_node (hash_table, i, notify);
-      deleted++;
-    }
-
-  }
-#endif
-
-  return deleted;
-}
-
-/**
- * g_hash_table_foreach_remove:
- * @hash_table: a #GHashTable
- * @func: the function to call for each key/value pair
- * @user_data: user data to pass to the function
- *
- * Calls the given function for each key/value pair in the
- * #GHashTable. If the function returns %TRUE, then the key/value
- * pair is removed from the #GHashTable. If you supplied key or
- * value destroy functions when creating the #GHashTable, they are
- * used to free the memory allocated for the removed keys and values.
- *
- * See #GHashTableIter for an alternative way to loop over the
- * key/value pairs in the hash table.
- *
- * Returns: the number of key/value pairs removed
- */
-uint32_t
-g_hash_table_foreach_remove (GHashTable *hash_table,
-                             GHRFunc     func,
-                             void*    user_data)
-{
-  assert (hash_table != NULL);
-  assert (func != NULL);
-
-  return g_hash_table_foreach_remove_or_steal (hash_table, func, user_data, TRUE);
-}
-
-/**
- * g_hash_table_foreach_steal:
- * @hash_table: a #GHashTable
- * @func: the function to call for each key/value pair
- * @user_data: user data to pass to the function
- *
- * Calls the given function for each key/value pair in the
- * #GHashTable. If the function returns %TRUE, then the key/value
- * pair is removed from the #GHashTable, but no key or value
- * destroy functions are called.
- *
- * See #GHashTableIter for an alternative way to loop over the
- * key/value pairs in the hash table.
- *
- * Returns: the number of key/value pairs removed.
- */
-uint32_t
-g_hash_table_foreach_steal (GHashTable *hash_table,
-                            GHRFunc     func,
-                            void*    user_data) {
-  assert (hash_table != NULL);
-  assert (func != NULL);
-
-  return g_hash_table_foreach_remove_or_steal (hash_table, func, user_data, FALSE);
-}
-
-/**
- * g_hash_table_foreach:
- * @hash_table: a #GHashTable
- * @func: the function to call for each key/value pair
- * @user_data: user data to pass to the function
- *
- * Calls the given function for each of the key/value pairs in the
- * #GHashTable.  The function is passed the key and value of each
- * pair, and the given @user_data parameter.  The hash table may not
- * be modified while iterating over it (you can't add/remove
- * items). To remove all items matching a predicate, use
- * g_hash_table_foreach_remove().
- *
- * See g_hash_table_find() for performance caveats for linear
- * order searches in contrast to g_hash_table_lookup().
- */
-void g_hash_table_foreach (GHashTable *hash_table,
-                          GHFunc      func,
-                          void*    user_data) {
-  int i;
-
-  assert (hash_table != NULL);
-  assert (func != NULL);
-
-  assert(0);
-
-#if 0
-  for (i = 0; i < hash_table->size; i++) {
-    uint32_t node_hash = hash_table->hashes[i];
-    void* node_key = hash_table->keys[i];
-    void* node_value = hash_table->values[i];
-
-    if (HASH_IS_REAL (node_hash)) {
-      (* func) (node_key, node_value, user_data);
-    }
-
-  }
-#endif
-}
 
 /**
  * g_hash_table_find:

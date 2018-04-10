@@ -5,6 +5,7 @@
 #include "ds/uthash.h"
 
 #ifdef __cplusplus
+#define _Static_assert static_assert
 extern "C" {
 #endif
 
@@ -52,23 +53,6 @@ struct linux_dirent_tail {
 	char                pad;
 	unsigned char       d_type;
 };
-
-#ifdef HASHTABLE
-
-#define USE_GLIB_HASH 1
-#define USE_CUCKOO_HASH !(USE_GLIB_HASH)
-
-#if USE_CUCKOO_HASH
-#include "cuckoo_hash.h"
-typedef struct cuckoo_hash inode_hash_table;
-#elif USE_GLIB_HASH
-#include <glib/glib.h>
-typedef GHashTable inode_hash_table;
-#else
-#error "No hashtable specified for inodes in inode_hash.h!"
-#endif
-
-#endif
 
 #ifdef __cplusplus
 }

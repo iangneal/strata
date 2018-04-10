@@ -287,9 +287,6 @@ struct inode {
 	struct db_handle *i_db;
 	int (*i_writeback)(struct inode *inode);
 	///////////////////////////////////////////////////////////////////
-#ifdef HASHTABLE
-	inode_hash_table *htable;
-#endif
 };
 
 static inline struct super_block* get_inode_sb(uint8_t dev, struct inode *inode)

@@ -15,7 +15,7 @@ fi
 
 make clean scrub all
 
-for b in 1 16; do
+for b in 1 255 512; do
   for i in `seq 0 2`; do
     for l in `seq 0 2`; do
       sudo ../../libfs/bin/mkfs.mlfs 1

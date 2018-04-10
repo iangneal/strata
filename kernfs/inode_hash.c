@@ -3,55 +3,94 @@
 #include <stdbool.h>
 #include "inode_hash.h"
 
-#include "ghash.h"
 
 #define GPOINTER_TO_UINT(x) ((uint64_t)x)
+
+mlfs_fsblk_t single_hash_meta_loc = 0;
+mlfs_fsblk_t chunk_hash_meta_loc = 0;
+mlfs_fsblk_t id_map_meta_loc = 0;
 
 // (iangneal): Global hash table for all of NVRAM. Each inode has a point to
 // this one hash table just for abstraction of the inode interface.
 static GHashTable *ghash = NULL;
 static GHashTable *gsuper = NULL;
 
+/*
+ *
+ */
 void init_hash(struct inode *inode) {
-  //TODO: init in NVRAM.
+  assert(inode);
+
   if (!ghash) {
-    printf("INIT HASH!!!\n");
+    printf("Initializing NVM hash table structures...\n");
     struct super_block *sb = get_inode_sb(inode->dev, inode);
-    // 1 block table
-    ghash = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks, 1);
+
+    // Calculate the locations of all the data structure metadata.
+    single_hash_meta_loc = sb->num_blocks - 1;
+    chunk_hash_meta_loc = single_hash_meta_loc - 1;
+    id_map_meta_loc = chunk_hash_meta_loc - 1;
+
+    // single block table
+    ghash = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks, 1,
+        single_hash_meta_loc);
     if (!ghash) {
-      panic("Failed to initialize inode hashtable\n");
+      panic("Failed to initialize the single-block hash table.\n");
     }
 
-    // Range table
-#if 0
-    gsuper = g_hash_table_new(g_direct_hash, g_direct_equal,
-        sb->num_blocks, RANGE_SIZE);
+    printf("Finished initializing the single-block hash table.\n");
+
+    // chunk (maps a range of blocks) hash table
+    gsuper = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks * 2,
+        RANGE_SIZE, chunk_hash_meta_loc);
     if (!gsuper) {
-      panic("Failed to initialize inode hashtable\n");
+      panic("Failed to initialize multi-block hash table\n");
     }
-#endif
+
+    printf("Finished initializing the multi-block hash table.\n");
+
+  } else {
+    panic("Error: init_hash has been called multiple times! A programmer error"
+          " has occurred somewhere. Please call this function only once.\n");
   }
+
+  printf("Finished initializing NVM hash table structures.\n");
 }
 
-int insert_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t value) {
+int insert_hash(GHashTable *hash, struct inode *inode, hash_key_t key,
+    hash_value_t value, hash_value_t size) {
   int ret = 0;
-  hash_key_t k = MAKEKEY(inode, key);
-  //gboolean exists = g_hash_table_insert(ghash, GKEY2PTR(k), GVAL2PTR(value));
-  gboolean exists = g_hash_table_insert(ghash, k, value);
+
   // if not exists, then the value was not already in the table, therefore
   // success.
-  return (int)exists;
+
+  return g_hash_table_insert(hash, key, value, size);
 }
 
 /*
  * Returns 0 if not found (value == 0 means no associated value).
  */
-int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value) {
+int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value,
+    hash_value_t *size, hash_value_t *index) {
   int ret = 0;
   hash_key_t k = MAKEKEY(inode, key);
-  *value = g_hash_table_lookup(ghash, k);
-  return *value != 0;
+  hash_key_t r = RANGE_KEY(inode->inum, key);
+
+  *index = 0;
+  // Two-level lookup
+  g_hash_table_lookup(gsuper, r, value, size);
+  //printf("%u -> %lu, %lu %lu\n", key, r, *value, *size);
+  bool present = (*value) && ((key & RANGE_BITS) < *size);
+  //printf("--- %lu & %lu (%lu) < %lu\n", key, RANGE_BITS, key & RANGE_BITS, *size);
+  if (!present) {
+    //printf("Not in big.\n");
+    g_hash_table_lookup(ghash, k, value, size);
+    present = *value != 0;
+    //if (!present) printf("Not in small.\n");
+  } else {
+    *index = (key & RANGE_BITS);
+  }
+
+  return (int) present;
 }
 
 int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
@@ -70,12 +109,14 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
   bool set = false;
 
   for (mlfs_lblk_t i = 0; i < map->m_len; ) {
+    hash_value_t index;
     hash_value_t value;
-    int pre = lookup_hash(inode, map->m_lblk + i, &value);
+    hash_value_t size;
+    int pre = lookup_hash(inode, map->m_lblk + i, &value, &size, &index);
     if (!pre) {
       goto create;
     }
-
+#if 0
     if (SPECIAL(value)) {
       len -= MAX_CONTIGUOUS_BLOCKS - INDEX(value);
       i += MAX_CONTIGUOUS_BLOCKS - INDEX(value);
@@ -91,6 +132,14 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
         set = true;
       }
     }
+#endif
+    if (!set) {
+      map->m_pblk = value + index;
+      set = true;
+    }
+
+    len -= size;
+    i += size;
 
   }
   return ret;
@@ -109,6 +158,96 @@ create:
       a_type = DATA;
     }
 
+
+    mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
+    for (int c = 0; c < len; ) {
+      int offset = ((lb + c) & RANGE_BITS);
+      int aligned = offset == 0;
+      if (len >= (RANGE_SIZE / 2) && len <= RANGE_SIZE && aligned) {
+
+        /*
+         * It's possible part of the range has already been allocated.
+         * Say if someone requests (RANGE_SIZE + 1) blocks, but the blocks from
+         * (RANGE_SIZE, RANGE_SIZE + RANGE_SIZE) have already been allocated,
+         * we need to skip the last block.
+         */
+        hash_value_t index;
+        hash_value_t value;
+        hash_value_t size;
+        int pre = lookup_hash(inode, lb + c, &value, &size, &index);
+        if (pre) {
+          c += size;
+          if (!set) {
+            map->m_pblk = value + index;
+            set = true;
+          }
+
+          continue;
+        }
+
+
+        uint32_t nblocks = min(len, RANGE_SIZE);
+        int r = mlfs_new_blocks(sb, &blockp, nblocks, 0, 0, a_type, 0);
+        if (r > 0) {
+          bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
+          sb->used_blocks += r;
+        } else if (ret == -ENOSPC) {
+          panic("Fail to allocate block\n");
+        }
+
+        //printf("Insert to big.\n");
+        hash_key_t k = RANGE_KEY(inode->inum, lb + c);
+        int success = insert_hash(gsuper, inode, k, blockp, nblocks);
+        if (!success) {
+          panic("Could not insert huge range!\n");
+        }
+
+        if (!set) {
+          map->m_pblk = blockp;
+          set = true;
+        }
+
+        c += nblocks;
+
+      } else {
+        uint32_t nblocks_to_alloc = min(len, RANGE_SIZE - offset);
+
+        int r = mlfs_new_blocks(sb, &blockp, nblocks_to_alloc, 0, 0, a_type, 0);
+
+        if (r > 0) {
+          bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
+          sb->used_blocks += r;
+        } else if (ret == -ENOSPC) {
+          panic("Fail to allocate block\n");
+        }
+
+        if (!set) {
+          map->m_pblk = blockp;
+          set = true;
+        }
+
+        printf("Insert to small: %u.\n" nblocks_to_alloc);
+        for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
+          hash_key_t k = MAKEKEY(inode, lb + i + c);
+          int success = insert_hash(ghash, inode, k, blockp,
+              nblocks_to_alloc - i);
+
+          if (!success) {
+            fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
+                lb + i + c, blockp);
+            panic("Could not insert into small table!");
+          }
+          fprintf(stdout, "inserted: key = %u, val = %0lx\n",
+              lb + i + c, blockp);
+
+        }
+
+        c += nblocks_to_alloc;
+
+      }
+    }
+
+#if 0
     // break everything up into size of continuity blocks.
     for (int c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
       uint32_t nblocks_to_alloc = min(len - c, MAX_CONTIGUOUS_BLOCKS);
@@ -132,32 +271,18 @@ create:
       for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
         hash_value_t in = MAKEVAL(nblocks_to_alloc > 1, i, blockp);
 
-        // check if exists first
-        // should already be checked for!
-        /*
-        mlfs_fsblk_t cur;
-        if (lookup_hash(inode, lb + i, &cur)) {
-          if (cur != in) {
-            fprintf(stderr, "insert key %u with val %0lx collides with %0lx\n",
-                lb + i, in, cur);
-            assert(cur == in);
-          }
-          continue;
-        }
-        */
-
-        int success = insert_hash(inode, lb + i, in);
+        int success = insert_hash(ghash, inode, lb + i, in, nblocks_to_alloc - i);
 
         if (!success) {
-          //fprintf(stderr, "%d, %d, %lu: %lu\n", 1, CONTINUITY_BITS,
-          //    REMAINING_BITS, CHAR_BIT * sizeof(hash_value_t));
           fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
               lb + i, in);
         }
+
       }
 
       //nvram_flush(ghash);
     }
+#endif
 
   }
 

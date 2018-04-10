@@ -47,7 +47,8 @@ typedef struct  _hash_entry {
 #define KB(x)   ((size_t) (x) << 10)
 #define MB(x)   ((size_t) (x) << 20)
 
-#define RANGE_SIZE (1 << 4) // 16
+//#define RANGE_SIZE (1 << 4) // 16
+#define RANGE_SIZE (1 << 9) // 512 -- 2MB
 #define RANGE_BITS (RANGE_SIZE - 1)
 #define RANGE_MASK (~RANGE_BITS)
 #define RANGE_KEY(i, l) ( (((uint64_t)(i)) << 32) | ((l) & RANGE_MASK))
@@ -126,16 +127,18 @@ typedef int (*GHRFunc) (void* key,
                         void* user_data);
 
 
-GHashTable* g_hash_table_new(GHashFunc  hash_func,
-                             GEqualFunc key_equal_func,
-                             size_t     max_entries,
-                             size_t     range_size);
+GHashTable* g_hash_table_new(GHashFunc    hash_func,
+                             GEqualFunc   key_equal_func,
+                             size_t       max_entries,
+                             size_t       range_size,
+                             mlfs_fsblk_t metadata_location);
 
 void  g_hash_table_destroy(GHashTable     *hash_table);
 
 int g_hash_table_insert(GHashTable *hash_table,
                         mlfs_fsblk_t       key,
-                        mlfs_fsblk_t       value);
+                        mlfs_fsblk_t       value,
+                        mlfs_fsblk_t       range);
 
 int g_hash_table_replace(GHashTable *hash_table,
                          mlfs_fsblk_t key,
@@ -154,15 +157,11 @@ int g_hash_table_steal(GHashTable *hash_table,
 
 void g_hash_table_steal_all(GHashTable *hash_table);
 
-mlfs_fsblk_t g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key);
+void g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key,
+    mlfs_fsblk_t *val, mlfs_fsblk_t *size);
 
 int g_hash_table_contains(GHashTable *hash_table,
                           mlfs_fsblk_t key);
-
-int g_hash_table_lookup_extended(GHashTable *hash_table,
-                                 const void *lookup_key,
-                                 void       **orig_key,
-                                 void       **value);
 
 void g_hash_table_foreach(GHashTable *hash_table,
                           GHFunc      func,
@@ -178,10 +177,6 @@ unsigned g_hash_table_size(GHashTable *hash_table);
 void** g_hash_table_get_keys_as_array(GHashTable *hash_table,
                                       unsigned *length);
 
-
-GHashTable* g_hash_table_ref(GHashTable *hash_table);
-
-void g_hash_table_unref(GHashTable *hash_table);
 
 /* Hash Functions
  */
@@ -251,6 +246,7 @@ nvram_read_entry(GHashTable *ht, mlfs_fsblk_t idx, hash_entry_t *ret) {
   nvram_read(ht, offset, &buf, 0);
   *ret = buf[BUF_IDX(idx)];
 }
+
 /*
  * Read the hashtable metadata from disk. If the size is zero, then we need to
  * allocate the table. Otherwise, the structures have already been
@@ -327,16 +323,15 @@ nvram_write_metadata(GHashTable *hash, mlfs_fsblk_t location) {
   struct super_block *super = sb[g_root_dev];
   int ret;
   // Set up the hash table metadata
-  struct dhashtable_meta metadata = {
-    .nvram_size = hash->nvram_size,
-    .size = hash->size,
-    .range_size = hash->range_size,
-    .mod = hash->mod,
-    .mask = hash->mask,
-    .nnodes = hash->nnodes,
-    .noccupied = hash->noccupied,
-    .data_start = hash->data
-  };
+  struct dhashtable_meta metadata;
+  metadata.nvram_size = hash->nvram_size;
+  metadata.size = hash->size;
+  metadata.range_size = hash->range_size;
+  metadata.mod = hash->mod;
+  metadata.mask = hash->mask;
+  metadata.nnodes = hash->nnodes;
+  metadata.noccupied = hash->noccupied;
+  metadata.data_start = hash->data;
 
 
   // TODO: maybe generalize for other devices.

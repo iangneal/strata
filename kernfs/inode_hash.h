@@ -10,6 +10,7 @@
 #ifdef KERNFS
 #include "balloc.h"
 #include "migrate.h"
+#include "ghash.h"
 #endif
 
 #ifdef __cplusplus
@@ -46,14 +47,30 @@ typedef mlfs_fsblk_t hash_value_t;
 typedef uint64_t hash_key_t;
 
 /*
+ * This is how the global hash table structure is designed and used:
+ * TODO
+ */
+
+/*
+ * Globals for where the hash tables and other bookkeeping structures are kept
+ * on disk. They are calculated as an offset based on the size of the NVM
+ * device.
+ */
+extern mlfs_fsblk_t single_hash_meta_loc;
+extern mlfs_fsblk_t chunk_hash_meta_loc;
+extern mlfs_fsblk_t id_map_meta_loc;
+
+/*
  * Generic hash table functions.
  */
 
 void init_hash(struct inode *inode);
 
-int insert_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t value);
+int insert_hash(GHashTable *hash, struct inode *inode, hash_key_t key,
+    hash_value_t value, hash_value_t size);
 
-int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value);
+int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value,
+    hash_value_t *size, hash_value_t *index);
 
 /*
  * Hash table metrics.

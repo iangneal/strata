@@ -140,6 +140,9 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
   std::uniform_int_distribution<mlfs_lblk_t> dist(from, to - 1);
 
   int ntests = (to - from) / nr_block;
+  if ((to - from) % nr_block) {
+    ntests++;
+  }
 
   switch(s) {
     case SEQUENTIAL:
@@ -150,9 +153,10 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
       break;
     case REVERSE:
       for (mlfs_lblk_t f = 0; f < ntests; ++f) {
-        mlfs_lblk_t lb = from + ((ntests - 1 - f) * nr_block);
+        mlfs_lblk_t lb = from + (f * nr_block);
         merge_list.push_back(lb);
       }
+      merge_list.reverse();
       break;
     case RANDOM:
       // Create merge_set (set of unique, random, randomly ordered logical blocks)
@@ -477,7 +481,10 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_start(&lookup);
   for (mlfs_lblk_t lb : lookup_order) {
 
-    assert(res_check.find(lb) != res_check.end());
+    if (res_check.find(lb) == res_check.end()) {
+      fprintf(stderr, "Error: could not find lb %u.\n", lb);
+      assert(res_check.find(lb) != res_check.end());
+    }
 
     map.m_lblk = lb;
     map.m_len = nr_block;
