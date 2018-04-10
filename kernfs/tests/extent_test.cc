@@ -135,14 +135,9 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
   std::random_device rd;
   std::mt19937 mt(rd());
   std::list<mlfs_lblk_t> merge_list;
-  std::unordered_set<mlfs_lblk_t> merge_set;
-  // inclusive range, so we don't want to go off the end.
-  std::uniform_int_distribution<mlfs_lblk_t> dist(from, to - 1);
+  std::vector<mlfs_lblk_t> merge_vec;
 
   int ntests = (to - from) / nr_block;
-  if ((to - from) % nr_block) {
-    ntests++;
-  }
 
   switch(s) {
     case SEQUENTIAL:
@@ -159,13 +154,12 @@ list<mlfs_lblk_t> ExtentTest::genLogicalBlockSequence(SequenceType s,
       merge_list.reverse();
       break;
     case RANDOM:
-      // Create merge_set (set of unique, random, randomly ordered logical blocks)
-      while (merge_set.size() < ntests) {
-        mlfs_lblk_t b = dist(mt);
-        mlfs_lblk_t off = b % nr_block;
-        merge_set.insert(b - off);
+      for (mlfs_lblk_t f = 0; f < ntests; ++f) {
+        mlfs_lblk_t lb = from + (f * nr_block);
+        merge_vec.push_back(lb);
       }
-      merge_list.insert(merge_list.begin(), merge_set.begin(), merge_set.end());
+      std::random_shuffle(merge_vec.begin(), merge_vec.end());
+      merge_list.insert(merge_list.begin(), merge_vec.begin(), merge_vec.end());
       break;
     default:
       cerr << "No defined behavior for " << s << endl;

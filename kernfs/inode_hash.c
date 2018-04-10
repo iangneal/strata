@@ -160,10 +160,11 @@ create:
 
 
     mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
+    //printf("Starting insert: %u, %lu, %lu\n", map->m_lblk, map->m_len, len);
     for (int c = 0; c < len; ) {
       int offset = ((lb + c) & RANGE_BITS);
       int aligned = offset == 0;
-      if (len >= (RANGE_SIZE / 2) && len <= RANGE_SIZE && aligned) {
+      if (len >= (RANGE_SIZE / 2) && aligned) {
 
         /*
          * It's possible part of the range has already been allocated.
@@ -210,7 +211,7 @@ create:
         c += nblocks;
 
       } else {
-        uint32_t nblocks_to_alloc = min(len, RANGE_SIZE - offset);
+        uint32_t nblocks_to_alloc = min(len - c, RANGE_SIZE - offset);
 
         int r = mlfs_new_blocks(sb, &blockp, nblocks_to_alloc, 0, 0, a_type, 0);
 
@@ -226,7 +227,7 @@ create:
           set = true;
         }
 
-        printf("Insert to small: %u.\n" nblocks_to_alloc);
+        //printf("Insert to small: %u.\n", nblocks_to_alloc);
         for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
           hash_key_t k = MAKEKEY(inode, lb + i + c);
           int success = insert_hash(ghash, inode, k, blockp,
@@ -237,8 +238,6 @@ create:
                 lb + i + c, blockp);
             panic("Could not insert into small table!");
           }
-          fprintf(stdout, "inserted: key = %u, val = %0lx\n",
-              lb + i + c, blockp);
 
         }
 
