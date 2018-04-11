@@ -92,7 +92,7 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
  * Helper functions.
  */
 
-int mlfs_hash_persist(handle_t *handle, struct inode *inode);
+int mlfs_hash_persist();
 
 #ifdef __cplusplus
 }

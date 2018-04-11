@@ -417,17 +417,21 @@ g_hash_table_new (GHashFunc    hash_func,
 
   // cache
 #ifdef HASHCACHE
-  hash_table->dirty = -1;
   hash_table->cache = calloc(NV_IDX(scaled_size), sizeof(hash_entry_t*));
   assert(hash_table->cache);
 
   hash_entry_t *unused;
 
   for (int i = 0; i < nblocks; ++i) {
-    hash_table->cache[i] = (hash_entry_t*)malloc(g_block_size_bytes);
-    // load from NVRAM
+    hash_table->cache[i] = calloc(g_block_size_bytes, sizeof(hash_entry_t));
+    // load from NVRAM (force flag)
     nvram_read(hash_table, i, &unused, 1);
   }
+
+  hash_table->bh_cache = calloc(NV_IDX(scaled_size), sizeof(bool));
+  assert(hash_table->bh_cache);
+
+  hash_table->bh_cache_head = NULL;
 #endif
 
 

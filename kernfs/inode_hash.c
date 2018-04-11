@@ -134,6 +134,7 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
     }
 #endif
     if (!set) {
+      //printf("Setting to %lu + %lu\n", value, index);
       map->m_pblk = value + index;
       set = true;
     }
@@ -165,7 +166,6 @@ create:
       int offset = ((lb + c) & RANGE_BITS);
       int aligned = offset == 0;
       if (len >= (RANGE_SIZE / 2) && aligned) {
-
         /*
          * It's possible part of the range has already been allocated.
          * Say if someone requests (RANGE_SIZE + 1) blocks, but the blocks from
@@ -182,12 +182,10 @@ create:
             map->m_pblk = value + index;
             set = true;
           }
-
           continue;
         }
 
-
-        uint32_t nblocks = min(len, RANGE_SIZE);
+        uint32_t nblocks = min(len - c, RANGE_SIZE);
         int r = mlfs_new_blocks(sb, &blockp, nblocks, 0, 0, a_type, 0);
         if (r > 0) {
           bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
@@ -285,6 +283,7 @@ create:
 
   }
 
+  mlfs_hash_persist();
   return ret;
 }
 int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
@@ -329,8 +328,11 @@ double check_load_factor(struct inode *inode) {
   return load;
 }
 
-int mlfs_hash_persist(handle_t *handle, struct inode *inode) {
+int mlfs_hash_persist() {
+  sync_all_buffers(g_bdev[g_root_dev]);
   nvram_flush(ghash);
+  nvram_flush(gsuper);
+  return 0;
 }
 
 #endif

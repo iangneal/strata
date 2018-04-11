@@ -47,8 +47,8 @@ typedef struct  _hash_entry {
 #define KB(x)   ((size_t) (x) << 10)
 #define MB(x)   ((size_t) (x) << 20)
 
-//#define RANGE_SIZE (1 << 4) // 16
-#define RANGE_SIZE (1 << 9) // 512 -- 2MB
+#define RANGE_SIZE (1 << 5) // 32
+//#define RANGE_SIZE (1 << 9) // 512 -- 2MB
 #define RANGE_BITS (RANGE_SIZE - 1)
 #define RANGE_MASK (~RANGE_BITS)
 #define RANGE_KEY(i, l) ( (((uint64_t)(i)) << 32) | ((l) & RANGE_MASK))
@@ -93,6 +93,12 @@ struct dhashtable_meta {
   mlfs_fsblk_t data_start;
 };
 
+typedef struct _bh_cache_node {
+  uint64_t cache_index;
+  struct _bh_cache_node *next;
+} bh_cache_node;
+
+
 typedef struct _GHashTable {
   int             size;
   int             mod;
@@ -117,10 +123,14 @@ typedef struct _GHashTable {
 #ifdef HASHCACHE
   // array of blocks
   hash_entry_t **cache;
-  // dirty block
-  int dirty;
+  // simple yes/no if we've checked the buffer head yet.
+  bool *bh_cache;
+  // list of cache locations to override on flush
+  bh_cache_node *bh_cache_head;
 #endif
 } GHashTable;
+
+
 
 typedef int (*GHRFunc) (void* key,
                         void* value,
@@ -188,6 +198,7 @@ int g_direct_equal(const void *v1,
 
 uint64_t reads;
 uint64_t writes;
+uint64_t blocks;
 
 /*
  * Read a NVRAM block and give the users a reference to our cache (saves a
@@ -294,6 +305,7 @@ nvram_read_metadata(GHashTable *hash, mlfs_fsblk_t location) {
 
 #ifdef HASHCACHE
 static inline void nvram_flush(GHashTable *ht) {
+#if 0
   struct buffer_head *bh;
   int ret;
 
@@ -313,6 +325,16 @@ static inline void nvram_flush(GHashTable *ht) {
     writes++;
 
     ht->dirty = -1;
+  }
+#endif
+  if (ht->bh_cache_head) writes++;
+
+  while(ht->bh_cache_head) {
+    bh_cache_node *tmp = ht->bh_cache_head;
+    ht->bh_cache[tmp->cache_index] = false;
+    ht->bh_cache_head = tmp->next;
+    free(tmp);
+    blocks++;
   }
 }
 #endif
@@ -401,19 +423,39 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   mlfs_fsblk_t block_offset = BUF_IDX(index) * sizeof(hash_entry_t);
 
 #ifdef HASHCACHE
-  if (ht->cache[NV_IDX(index)]) {
-    ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
+  ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
 
-    if (ht->dirty >= 0 && ht->dirty != NV_IDX(index)) {
-      nvram_flush(ht);
-    }
+  printf("HASH: %lx -> {%lx, %lx, %lu}\n", index, val->key, val->value, val->size);
 
-    ht->dirty = NV_IDX(index);
+  // check if we've seen this buffer head before. if not, we need to fetch
+  // it and point to our cache page.
+  if (!ht->bh_cache[NV_IDX(index)]) {
+    // Set up the buffer head -- once we point it to a cache page, we don't
+    // need to do this again, just manipulate the page.
+    bh = sb_getblk(g_root_dev, block_addr);
 
-    return;
+    bh->b_data = (uint8_t*)ht->cache[NV_IDX(index)];
+    bh->b_size = g_block_size_bytes;
+    bh->b_offset = 0;
+
+    set_buffer_dirty(bh);
+    brelse(bh);
+
+    // Now we need to set up book-keeping.
+    ht->bh_cache[NV_IDX(index)] = true;
+
+    bh_cache_node *tmp = (bh_cache_node*)malloc(sizeof(*tmp));
+
+    if (unlikely(!tmp)) panic("ENOMEM");
+
+    tmp->cache_index = NV_IDX(index);
+    tmp->next = ht->bh_cache_head;
+    ht->bh_cache_head = tmp;
   }
-#endif
 
+
+  //printf("Dirty: %lu (%p)\n", block_addr, bh);
+#else
   // TODO: maybe generalize for other devices.
   bh = bh_get_sync_IO(g_root_dev, block_addr, BH_NO_DATA_ALLOC);
   assert(bh);
@@ -426,6 +468,7 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   assert(!ret);
   bh_release(bh);
   writes++;
+#endif
 }
 
 #ifdef __cplusplus

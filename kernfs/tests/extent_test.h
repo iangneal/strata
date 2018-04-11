@@ -58,11 +58,11 @@ class ExtentTest
   list<mlfs_lblk_t> genLogicalBlockSequence(SequenceType s, mlfs_lblk_t from,
       mlfs_lblk_t ti, uint32_t nr_block);
 
+  list<mlfs_lblk_t> genLogicalBlockSequence(SequenceType s,
+      const list<mlfs_lblk_t>& insert_order);
+
   void run_read_block_test(uint32_t inum, mlfs_lblk_t from,
     mlfs_lblk_t to, uint32_t nr_block);
-
-  void run_multi_block_test(mlfs_lblk_t from, mlfs_lblk_t to,
-    uint32_t nr_block);
 
   tuple<double, double> run_multi_block_test(list<mlfs_lblk_t> insert_order,
     list<mlfs_lblk_t> lookup_order, int nr_block = 1);
