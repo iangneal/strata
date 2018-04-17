@@ -56,6 +56,11 @@ MLFS_FLAGS += -DBALLOC
 #MLFS_FLAGS += -DEXPERIMENTAL
 MLFS_FLAGS += -DHASHTABLE
 
+#######
+# Optimization definitions
+#######
+MLFS_FLAGS += -DREUSE_PREVIOUS_PATH  # optimization for extent trees
+
 #DEBUG = -g -O0
 #DEBUG = -g -Ofast
 DEBUG = -g -O3

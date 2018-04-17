@@ -384,7 +384,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
 
     res_check[lb] = map.m_pblk;
 
-    cout << hex << lb << " ---> " << res_check[lb] << endl;
+    //cout << hex << lb << " ---> " << res_check[lb] << endl;
     //fprintf(stdout, "INSERT [%d/%d] offset %u, block: %lx len %u\n",
     //    from, to, from, map.m_pblk, map.m_len);
   }
@@ -394,9 +394,6 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   cout << "Hashtable load factor: " << check_load_factor(inode) << endl;
   cout << "Reads: " << reads << " Writes: " << writes << endl;
   cout << "Total blocks written: " << blocks << endl;
-  //cout << "Persisting hash table..." << endl;
-  //assert(!mlfs_hash_persist(&handle, inode));
-  //cout << "Hash table persisted." << endl;
   reads = 0; writes = 0; blocks = 0;
 #endif
 

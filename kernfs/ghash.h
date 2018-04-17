@@ -47,8 +47,8 @@ typedef struct  _hash_entry {
 #define KB(x)   ((size_t) (x) << 10)
 #define MB(x)   ((size_t) (x) << 20)
 
-#define RANGE_SIZE (1 << 5) // 32
-//#define RANGE_SIZE (1 << 9) // 512 -- 2MB
+//#define RANGE_SIZE (1 << 5) // 32
+#define RANGE_SIZE (1 << 9) // 512 -- 2MB
 #define RANGE_BITS (RANGE_SIZE - 1)
 #define RANGE_MASK (~RANGE_BITS)
 #define RANGE_KEY(i, l) ( (((uint64_t)(i)) << 32) | ((l) & RANGE_MASK))
@@ -424,8 +424,6 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
 
 #ifdef HASHCACHE
   ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
-
-  printf("HASH: %lx -> {%lx, %lx, %lu}\n", index, val->key, val->value, val->size);
 
   // check if we've seen this buffer head before. if not, we need to fetch
   // it and point to our cache page.

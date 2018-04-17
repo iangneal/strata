@@ -37,9 +37,6 @@
 		mlfs_info("inode[%p]: " str "\n", inode, __VA_ARGS__); \
 	} while (0)
 
-// For optimization
-//#define REUSE_PREVIOUS_PATH
-
 #define BUG_ON(x) mlfs_assert((x) == 0)
 
 pthread_mutex_t block_bitmap_mutex;

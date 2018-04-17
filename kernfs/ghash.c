@@ -297,6 +297,7 @@ static void g_hash_table_remove_node (GHashTable  *hash_table,
 
   //nvram_read_entry(hash_table, i, &ent);
   ent.value = VTOMB;
+  ent.size = 0;
 
   /* Erect tombstone */
   nvram_update(hash_table, i, &ent);
@@ -709,8 +710,7 @@ g_hash_table_remove_internal (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &ent, &hash);
 
-  if (!HASH_IS_REAL (hash))
-    return FALSE;
+  if (!HASH_IS_REAL(hash)) return FALSE;
 
   g_hash_table_remove_node (hash_table, node_index, notify);
 

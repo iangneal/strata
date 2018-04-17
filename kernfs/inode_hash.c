@@ -93,6 +93,22 @@ int lookup_hash(struct inode *inode, mlfs_lblk_t key, hash_value_t* value,
   return (int) present;
 }
 
+/*
+ * Returns FALSE if the requested logical block was not present in any of the
+ * two hash tables.
+ */
+int erase_hash(struct inode *inode, mlfs_lblk_t key) {
+  int ret = 0;
+  hash_key_t k = MAKEKEY(inode, key);
+  hash_key_t r = RANGE_KEY(inode->inum, key);
+
+  if (!g_hash_table_remove(gsuper, r)) {
+    return g_hash_table_remove(ghash, k);
+  }
+
+  return true;
+}
+
 int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
 			struct mlfs_map_blocks *map, int flags) {
 	int err = 0;
@@ -116,23 +132,7 @@ int mlfs_hash_get_blocks(handle_t *handle, struct inode *inode,
     if (!pre) {
       goto create;
     }
-#if 0
-    if (SPECIAL(value)) {
-      len -= MAX_CONTIGUOUS_BLOCKS - INDEX(value);
-      i += MAX_CONTIGUOUS_BLOCKS - INDEX(value);
-      if (!set) {
-        map->m_pblk = ADDR(value) + INDEX(value);
-        set = true;
-      }
-    } else {
-      --len;
-      ++i;
-      if (!set) {
-        map->m_pblk = value;
-        set = true;
-      }
-    }
-#endif
+
     if (!set) {
       //printf("Setting to %lu + %lu\n", value, index);
       map->m_pblk = value + index;
@@ -161,6 +161,13 @@ create:
 
 
     mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
+    int r = mlfs_new_blocks(sb, &blockp, len, 0, 0, a_type, 0);
+    if (r > 0) {
+      bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
+      sb->used_blocks += r;
+    } else if (ret == -ENOSPC) {
+      panic("Fail to allocate block\n");
+    }
     //printf("Starting insert: %u, %lu, %lu\n", map->m_lblk, map->m_len, len);
     for (int c = 0; c < len; ) {
       int offset = ((lb + c) & RANGE_BITS);
@@ -186,14 +193,6 @@ create:
         }
 
         uint32_t nblocks = min(len - c, RANGE_SIZE);
-        int r = mlfs_new_blocks(sb, &blockp, nblocks, 0, 0, a_type, 0);
-        if (r > 0) {
-          bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
-          sb->used_blocks += r;
-        } else if (ret == -ENOSPC) {
-          panic("Fail to allocate block\n");
-        }
-
         //printf("Insert to big.\n");
         hash_key_t k = RANGE_KEY(inode->inum, lb + c);
         int success = insert_hash(gsuper, inode, k, blockp, nblocks);
@@ -207,18 +206,10 @@ create:
         }
 
         c += nblocks;
+        blockp += nblocks;
 
       } else {
         uint32_t nblocks_to_alloc = min(len - c, RANGE_SIZE - offset);
-
-        int r = mlfs_new_blocks(sb, &blockp, nblocks_to_alloc, 0, 0, a_type, 0);
-
-        if (r > 0) {
-          bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
-          sb->used_blocks += r;
-        } else if (ret == -ENOSPC) {
-          panic("Fail to allocate block\n");
-        }
 
         if (!set) {
           map->m_pblk = blockp;
@@ -240,57 +231,20 @@ create:
         }
 
         c += nblocks_to_alloc;
-
+        blockp += nblocks_to_alloc;
       }
     }
-
-#if 0
-    // break everything up into size of continuity blocks.
-    for (int c = 0; c < len; c += MAX_CONTIGUOUS_BLOCKS) {
-      uint32_t nblocks_to_alloc = min(len - c, MAX_CONTIGUOUS_BLOCKS);
-
-      int r = mlfs_new_blocks(sb, &blockp, nblocks_to_alloc, 0, 0, a_type, 0);
-
-      if (r > 0) {
-        bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
-        sb->used_blocks += r;
-      } else if (ret == -ENOSPC) {
-        panic("Fail to allocate block\n");
-        try_migrate_blocks(g_root_dev, g_ssd_dev, 0, 1);
-      }
-
-      if (!set) {
-        map->m_pblk = blockp;
-        set = true;
-      }
-
-      mlfs_lblk_t lb = map->m_lblk + (map->m_len - len);
-      for (uint32_t i = 0; i < nblocks_to_alloc; ++i) {
-        hash_value_t in = MAKEVAL(nblocks_to_alloc > 1, i, blockp);
-
-        int success = insert_hash(ghash, inode, lb + i, in, nblocks_to_alloc - i);
-
-        if (!success) {
-          fprintf(stderr, "could not insert: key = %u, val = %0lx\n",
-              lb + i, in);
-        }
-
-      }
-
-      //nvram_flush(ghash);
-    }
-#endif
 
   }
 
   mlfs_hash_persist();
   return ret;
 }
+
 int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 		mlfs_lblk_t start, mlfs_lblk_t end) {
-  gpointer key, value;
-  hash_key_t k;
-  hash_value_t v;
+
+  hash_value_t size, value, index;
 
 #if 0
   g_hash_table_iter_init (&iter, inode->htable);
@@ -316,6 +270,15 @@ int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
     }
   }
 #endif
+
+  // TODO: probably inefficient
+  for (mlfs_lblk_t i = start; i < end;) {
+    if (lookup_hash(inode, i, &value, &size, &index)) {
+      mlfs_free_blocks(handle, inode, NULL, i, size, 0);
+      erase_hash(inode, i);
+      i += size;
+    }
+  }
 
   return 0;
 }

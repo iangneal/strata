@@ -43,6 +43,11 @@ MLFS_FLAGS = -DMLFS_INFO -DKERNFS
 #MLFS_FLAGS += -DEXPERIMENTAL
 MLFS_FLAGS += -DHASHTABLE
 
+#######
+# Optimization definitions
+#######
+MLFS_FLAGS += -DREUSE_PREVIOUS_PATH  # optimization for extent trees
+
 
 ########
 #  Phony targets
