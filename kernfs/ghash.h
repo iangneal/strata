@@ -123,8 +123,9 @@ typedef struct _GHashTable {
 #ifdef HASHCACHE
   // array of blocks
   hash_entry_t **cache;
-  // simple yes/no if we've checked the buffer head yet.
-  bool *bh_cache;
+  // cache of buffer heads to reduce search time
+  // struct buffer_head == bh_t
+  bh_t **bh_cache;
   // list of cache locations to override on flush
   bh_cache_node *bh_cache_head;
 #endif
@@ -138,7 +139,6 @@ typedef int (*GHRFunc) (void* key,
 
 
 GHashTable* g_hash_table_new(GHashFunc    hash_func,
-                             GEqualFunc   key_equal_func,
                              size_t       max_entries,
                              size_t       range_size,
                              mlfs_fsblk_t metadata_location);
@@ -192,9 +192,6 @@ void** g_hash_table_get_keys_as_array(GHashTable *hash_table,
  */
 
 unsigned g_direct_hash (const void *v);
-
-int g_direct_equal(const void *v1,
-                   const void *v2);
 
 uint64_t reads;
 uint64_t writes;
@@ -304,34 +301,18 @@ nvram_read_metadata(GHashTable *hash, mlfs_fsblk_t location) {
 }
 
 #ifdef HASHCACHE
+/**
+ * Assumes sync_all_buffers has been called!
+ */
 static inline void nvram_flush(GHashTable *ht) {
-#if 0
-  struct buffer_head *bh;
-  int ret;
-
-  if (ht->dirty >= 0) {
-    assert(ht->cache[ht->dirty]);
-    // TODO: maybe generalize for other devices.
-    bh = bh_get_sync_IO(g_root_dev, ht->data + ht->dirty, BH_NO_DATA_ALLOC);
-    assert(bh);
-
-    bh->b_data = (uint8_t*)ht->cache[ht->dirty];
-    bh->b_size = g_block_size_bytes;
-    bh->b_offset = 0;
-
-    ret = mlfs_write(bh);
-    assert(!ret);
-    bh_release(bh);
-    writes++;
-
-    ht->dirty = -1;
-  }
-#endif
   if (ht->bh_cache_head) writes++;
 
   while(ht->bh_cache_head) {
     bh_cache_node *tmp = ht->bh_cache_head;
-    ht->bh_cache[tmp->cache_index] = false;
+    bh_t *buf = ht->bh_cache[tmp->cache_index];
+    //bitmap_zero(buf->b_dirty_bitmap, g_block_size_bytes);
+    buf->b_use_bitmap = 0;
+    ht->bh_cache[tmp->cache_index] = NULL;
     ht->bh_cache_head = tmp->next;
     free(tmp);
     blocks++;
@@ -422,7 +403,6 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   mlfs_fsblk_t block_addr = ht->data + NV_IDX(index);
   mlfs_fsblk_t block_offset = BUF_IDX(index) * sizeof(hash_entry_t);
 
-#ifdef HASHCACHE
   ht->cache[NV_IDX(index)][BUF_IDX(index)] = *val;
 
   // check if we've seen this buffer head before. if not, we need to fetch
@@ -433,14 +413,16 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
     bh = sb_getblk(g_root_dev, block_addr);
 
     bh->b_data = (uint8_t*)ht->cache[NV_IDX(index)];
-    bh->b_size = g_block_size_bytes;
+    bh->b_size = 0;
     bh->b_offset = 0;
+
+    mlfs_assert(bh->b_dirty_bitmap);
 
     set_buffer_dirty(bh);
     brelse(bh);
 
     // Now we need to set up book-keeping.
-    ht->bh_cache[NV_IDX(index)] = true;
+    ht->bh_cache[NV_IDX(index)] = bh;
 
     bh_cache_node *tmp = (bh_cache_node*)malloc(sizeof(*tmp));
 
@@ -449,24 +431,32 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
     tmp->cache_index = NV_IDX(index);
     tmp->next = ht->bh_cache_head;
     ht->bh_cache_head = tmp;
+  } else {
+    bh = ht->bh_cache[NV_IDX(index)];
   }
 
+  // Set bitmap cachelines.
+  bh->b_use_bitmap = 1;
 
-  //printf("Dirty: %lu (%p)\n", block_addr, bh);
-#else
-  // TODO: maybe generalize for other devices.
-  bh = bh_get_sync_IO(g_root_dev, block_addr, BH_NO_DATA_ALLOC);
-  assert(bh);
+  uint64_t size = sizeof(hash_entry_t);
+  uint64_t bit_start = (BUF_IDX(index) * size);
 
-  bh->b_data = (uint8_t*)val;
-  bh->b_size = sizeof(hash_entry_t);
-  bh->b_offset = block_offset;
+  /*
+   * It's possible that these entries overflow into two "cache lines", since
+   * they aren't aligned to units of 64 bytes.
+   */
+  size_t bit1 = bit_start / bh->b_cacheline_size;
+  size_t bit2 = (bit_start + size) / bh->b_cacheline_size;
+  bit2 = bit1 == bit2 ? 0 : bit2;
 
-  ret = mlfs_write(bh);
-  assert(!ret);
-  bh_release(bh);
-  writes++;
-#endif
+  /*
+   * Tracking to make sure we write back the same number of dirty regions.
+   * Test and set so we don't double count.
+   */
+  bh->b_size += !__test_and_set_bit(bit1, bh->b_dirty_bitmap);
+  if (bit2) {
+    bh->b_size += !__test_and_set_bit(bit2, bh->b_dirty_bitmap);
+  }
 }
 
 #ifdef __cplusplus

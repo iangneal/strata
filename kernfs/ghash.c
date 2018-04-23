@@ -362,7 +362,6 @@ g_hash_table_maybe_resize (GHashTable *hash_table) {
  */
 GHashTable *
 g_hash_table_new (GHashFunc    hash_func,
-                  GEqualFunc   key_equal_func,
                   size_t       max_entries,
                   size_t       range_size,
                   mlfs_fsblk_t metadata_location) {
@@ -371,7 +370,6 @@ g_hash_table_new (GHashFunc    hash_func,
   hash_table = malloc(sizeof(*hash_table));
 
   hash_table->hash_func          = hash_func ? hash_func : g_direct_hash;
-  hash_table->key_equal_func     = key_equal_func;
   hash_table->ref_count          = 1;
   hash_table->nnodes             = 0;
   hash_table->noccupied          = 0;
@@ -429,7 +427,7 @@ g_hash_table_new (GHashFunc    hash_func,
     nvram_read(hash_table, i, &unused, 1);
   }
 
-  hash_table->bh_cache = calloc(NV_IDX(scaled_size), sizeof(bool));
+  hash_table->bh_cache = calloc(NV_IDX(scaled_size), sizeof(*hash_table->bh_cache));
   assert(hash_table->bh_cache);
 
   hash_table->bh_cache_head = NULL;
@@ -830,23 +828,4 @@ uint32_t g_hash_table_size (GHashTable *hash_table) {
  */
 uint32_t g_direct_hash (const void* v) {
   return (uint32_t)((uint64_t)(v) & 0xFFFFFFFF);
-}
-
-/**
- * g_direct_equal:
- * @v1: (nullable): a key
- * @v2: (nullable): a key to compare with @v1
- *
- * Compares two #void* arguments and returns %TRUE if they are equal.
- * It can be passed to g_hash_table_new() as the @key_equal_func
- * parameter, when using opaque pointers compared by pointer value as
- * keys in a #GHashTable.
- *
- * This equality function is also appropriate for keys that are integers
- * stored in pointers, such as `GINT_TO_POINTER (n)`.
- *
- * Returns: %TRUE if the two keys match.
- */
-int g_direct_equal (const void* v1, const void* v2) {
-  return v1 == v2;
 }

@@ -31,7 +31,7 @@ void init_hash(struct inode *inode) {
     id_map_meta_loc = chunk_hash_meta_loc - 1;
 
     // single block table
-    ghash = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks, 1,
+    ghash = g_hash_table_new(g_direct_hash, sb->num_blocks, 1,
         single_hash_meta_loc);
     if (!ghash) {
       panic("Failed to initialize the single-block hash table.\n");
@@ -40,7 +40,7 @@ void init_hash(struct inode *inode) {
     printf("Finished initializing the single-block hash table.\n");
 
     // chunk (maps a range of blocks) hash table
-    gsuper = g_hash_table_new(g_direct_hash, g_direct_equal, sb->num_blocks * 2,
+    gsuper = g_hash_table_new(g_direct_hash, sb->num_blocks * 2,
         RANGE_SIZE, chunk_hash_meta_loc);
     if (!gsuper) {
       panic("Failed to initialize multi-block hash table\n");
