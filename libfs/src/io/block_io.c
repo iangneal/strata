@@ -311,14 +311,64 @@ int mlfs_write(struct buffer_head *b)
 	//mlfs_assert(b->b_blocknr + (b->b_size >> g_block_size_shift) <= disk_sb[b->b_dev].size);
 
 	storage_engine = g_bdev[b->b_dev]->storage_engine;
-	if (b->b_offset)
-		ret = storage_engine->write_unaligned(b->b_dev, b->b_data,
-				b->b_blocknr, b->b_offset, b->b_size);
+  // (iangneal): Support bitmap for byte-addressable storage.
+	if (b->b_offset || b->b_use_bitmap) {
+    if (b->b_use_bitmap) {
+      mlfs_assert(b->b_dirty_bitmap);
+      size_t total = 0;
+      // iangneal: find dirty regions, write them back one snippet at a time.
+      for (int i = 0; i < b->b_bitmap_size;) {
+        size_t region_size = 0;
+        uint32_t start = find_next_bit(b->b_dirty_bitmap, b->b_bitmap_size, i);
+        uint32_t next = 0;
+
+        if (start == b->b_bitmap_size) {
+          break;
+        } else {
+          i = start;
+        }
+
+        do {
+          printf("write back bit %d (block %lu)\n", i, b->b_blocknr);
+          __clear_bit(i, b->b_dirty_bitmap);
+          region_size++;
+          i++;
+          next = find_next_bit(b->b_dirty_bitmap, b->b_bitmap_size, i);
+        } while (next == start + region_size && next < b->b_bitmap_size);
+
+        size_t byte_off = start * b->b_cacheline_size;
+
+        ret = storage_engine->write_unaligned(
+            b->b_dev,
+            b->b_data + byte_off, /* need this because b_data is a whole page */
+            b->b_blocknr,
+            byte_off,
+            region_size * b->b_cacheline_size);
+        printf("$ storage_engine->write_unaligned(%lu, %lu)\n",
+            start * b->b_cacheline_size, region_size * b->b_cacheline_size);
+
+        if (ret != region_size * b->b_cacheline_size) {
+          mlfs_printf("%d (ret) != %lu\n", ret, region_size * b->b_cacheline_size);
+          panic("failed to write dirty bitmap range");
+        } else {
+          total += region_size;
+        }
+      }
+
+      ret = total;
+      //printf("Write: %lu\n", total);
+    } else {
+      ret = storage_engine->write_unaligned(b->b_dev, b->b_data,
+          b->b_blocknr, b->b_offset, b->b_size);
+    }
+  }
 	else
 		ret = storage_engine->write(b->b_dev, b->b_data, b->b_blocknr, b->b_size);
 
-	if (ret != b->b_size)
-		panic("fail to write storage\n");
+	if (ret != b->b_size) {
+    fprintf(stderr, "ret = %d, size = %u\n", ret, b->b_size);
+		panic("failed to write storage\n");
+  }
 
 	set_buffer_uptodate(b);
 
@@ -654,6 +704,13 @@ struct buffer_head *buffer_alloc(struct block_device *bdev,
 	bh->b_blocknr = block_nr;
 	bh->b_count = 0;
 
+  //bh->b_cacheline_size = 64; // units of 64 bytes
+  bh->b_cacheline_size = 256; // units of 64 bytes
+  bh->b_bitmap_size = (g_block_size_bytes / bh->b_cacheline_size);
+  bh->b_dirty_bitmap = (uint64_t*)mlfs_alloc(bh->b_bitmap_size / sizeof(uint8_t));
+  bh->b_use_bitmap = 0;
+  bitmap_zero(bh->b_dirty_bitmap, bh->b_bitmap_size);
+
 	//pthread_spin_init(&bh->b_spinlock, PTHREAD_PROCESS_SHARED);
 	pthread_mutex_init(&bh->b_lock, NULL);
 
@@ -675,6 +732,7 @@ static void buffer_free(struct buffer_head *bh)
 	if (bh->b_count != 0)
 		fprintf(stderr, "bh: %p b_count != 0, my pid: %d", bh, getpid());
 
+  mlfs_free(bh->b_dirty_bitmap);
 	mlfs_free(bh);
 }
 

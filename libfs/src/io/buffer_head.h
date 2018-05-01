@@ -25,8 +25,8 @@ enum bh_state_bits {
 			   */
 	BH_Mapped,		/* Has a disk mapping */
 	BH_New,		     /* Disk mapping was newly created by get_block */
-	BH_Sync_Read,       
-	BH_Sync_Write,      
+	BH_Sync_Read,
+	BH_Sync_Write,
 	BH_Async_Read,       /* Is under end_buffer_async_read I/O */
 	BH_Async_Write,      /* Is under end_buffer_async_write I/O */
 	BH_Delay,	    /* Buffer is not yet allocated on disk */
@@ -71,6 +71,14 @@ struct buffer_head
 	uint32_t b_size;	/* size of mapping */
 	uint32_t b_offset;	/* offset in a block (used for unaligned write) */
 	uint8_t *b_data;       /* pointer to data within the page */
+
+  // (iangneal): for NVM/reducing IO, so we don't have to write back a page
+  // at a time.
+  uint64_t *b_dirty_bitmap;
+  size_t b_cacheline_size; /* units of bytes that we flush */
+  size_t b_bitmap_size; /* number of bytes allocated for bitmap */
+  uint8_t b_use_bitmap;
+
 
 	struct block_device *b_bdev;
 	bh_end_io_t *b_end_io; /* I/O completion */
