@@ -220,11 +220,13 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   hash_entry_t *buffer;
   hash_entry_t cur;
 
-  /* If this happens, then the application is probably doing too much work
-   * from a destroy notifier. The alternative would be to crash any second
-   * (as keys, etc. will be NULL).
-   * Applications need to either use g_hash_table_destroy, or ensure the hash
-   * table is empty prior to removing the last reference using g_hash_table_unref(). */
+  /*
+   * If this happens, then the application is probably doing too much work from
+   * a destroy notifier. The alternative would be to crash any second (as keys,
+   * etc. will be NULL). Applications need to either use g_hash_table_destroy,
+   * or ensure the hash table is empty prior to removing the last reference
+   * using g_hash_table_unref().
+   */
   assert (hash_table->ref_count > 0);
 
   hash_value = hash_table->hash_func((void*)key);
@@ -237,8 +239,11 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   node_index = hash_value % hash_table->mod;
   //pthread_rwlock_rdlock(hash_table->locks + node_index);
 
+  /*
   nvram_read(hash_table, NV_IDX(node_index), &buffer, FALSE);
   cur = buffer[BUF_IDX(node_index)];
+  */
+  cur = hash_table->cache[NV_IDX(node_index)][BUF_IDX(node_index)];
 
   while (!IS_EMPTY(cur.value)) {
     if (cur.key == key && IS_VALID(cur.value)) {
@@ -256,12 +261,15 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
     // if the next index would be outside of the block we read from nvram,
     // we need to read another block
     // TODO profile me and see how many times we actually have to do this
+    /*
     if (NV_IDX(new_idx) != NV_IDX(node_index)) {
       nvram_read(hash_table, NV_IDX(new_idx), &buffer, FALSE);
     }
+    */
 
     node_index = new_idx;
-    cur = buffer[BUF_IDX(node_index)];
+    //cur = buffer[BUF_IDX(node_index)];
+    cur = hash_table->cache[NV_IDX(node_index)][BUF_IDX(node_index)];
   }
 
   if (have_tombstone) {
@@ -269,7 +277,8 @@ g_hash_table_lookup_node (GHashTable    *hash_table,
   }
 
   //pthread_rwlock_unlock(hash_table->locks + node_index);
-  *ent_return = buffer[BUF_IDX(node_index)];
+  //*ent_return = buffer[BUF_IDX(node_index)];
+  *ent_return = hash_table->cache[NV_IDX(node_index)][BUF_IDX(node_index)];
 
   return node_index;
 }
@@ -373,16 +382,22 @@ g_hash_table_new (GHashFunc    hash_func,
   hash_table->ref_count          = 1;
   hash_table->nnodes             = 0;
   hash_table->noccupied          = 0;
-  hash_table->nvram_size         = max_entries;
+  // Number of entries in nvram.
+  hash_table->nvram_size         = max_entries / range_size;
   hash_table->range_size         = range_size;
 
-  size_t scaled_size = max_entries / range_size;
   if (max_entries % range_size) {
-    scaled_size += range_size;
+    // If there's a partial range, need to not under-allocate.
+    hash_table->nvram_size++;
   }
 
+  g_hash_table_set_shift_from_size(hash_table, hash_table->nvram_size);
+  // Make sure the mod size doesn't go out of range.
+  hash_table->nvram_size = max(hash_table->nvram_size, hash_table->size);
+  size_t scaled_size = hash_table->nvram_size;
+
   size_t nblocks = NV_IDX(scaled_size);
-  if (BUF_IDX(nblocks)) {
+  if (BUF_IDX(scaled_size)) {
     // Partial block.
     nblocks++;
   }
@@ -399,16 +414,15 @@ g_hash_table_new (GHashFunc    hash_func,
 
   // init metadata lock
   hash_table->metalock = malloc(sizeof(pthread_mutex_t));
+  assert(hash_table->metalock);
   pthread_mutex_init(hash_table->metalock, NULL);
 
   if (!nvram_read_metadata(hash_table, metadata_location)) {
     printf("Metadata not set up. Allocating hashtable on NVRAM...\n");
-    g_hash_table_set_shift_from_size(hash_table, scaled_size);
-    // (iangneal): Allocate 3 strips in NVRAM for these three arrays.
     hash_table->data = nvram_alloc_range(nblocks);
 
     nvram_write_metadata(hash_table, metadata_location);
-    printf("max_entries: %lu, sizeof %lu, nblocks: %lu\n", max_entries,
+    printf("max_entries: %lu, sizeof %lu, nblocks: %lu\n", scaled_size,
         sizeof(hash_entry_t), nblocks);
   } else {
     printf("Metadata found!\n");
@@ -416,18 +430,19 @@ g_hash_table_new (GHashFunc    hash_func,
 
   // cache
 #ifdef HASHCACHE
-  hash_table->cache = calloc(NV_IDX(scaled_size), sizeof(hash_entry_t*));
+  hash_table->cache = calloc(nblocks, sizeof(hash_entry_t*));
   assert(hash_table->cache);
 
   hash_entry_t *unused;
 
   for (int i = 0; i < nblocks; ++i) {
-    hash_table->cache[i] = calloc(g_block_size_bytes, sizeof(hash_entry_t));
+    hash_table->cache[i] = calloc(g_block_size_bytes / sizeof(hash_entry_t),
+        sizeof(hash_entry_t));
     // load from NVRAM (force flag)
     nvram_read(hash_table, i, &unused, 1);
   }
 
-  hash_table->bh_cache = calloc(NV_IDX(scaled_size), sizeof(*hash_table->bh_cache));
+  hash_table->bh_cache = calloc(nblocks, sizeof(*hash_table->bh_cache));
   assert(hash_table->bh_cache);
 
   hash_table->bh_cache_head = NULL;
@@ -679,7 +694,7 @@ g_hash_table_contains (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &ent, &hash);
 
-  return HASH_IS_REAL (hash);
+  return IS_VALID(ent.value);
 }
 
 /*
@@ -708,7 +723,7 @@ g_hash_table_remove_internal (GHashTable    *hash_table,
 
   node_index = g_hash_table_lookup_node (hash_table, key, &ent, &hash);
 
-  if (!HASH_IS_REAL(hash)) return FALSE;
+  if (!IS_VALID(ent.value)) return FALSE;
 
   g_hash_table_remove_node (hash_table, node_index, notify);
 

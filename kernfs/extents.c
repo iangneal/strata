@@ -248,6 +248,7 @@ void mlfs_free_blocks(handle_t *handle, struct inode *inode,
 	struct buffer_head *bh, *tmp;
 	struct super_block *sb = get_inode_sb(handle->dev, inode);
 	UNUSED(flags);
+  UNUSED(fake);
 
 #ifdef BALLOC
 	ret = mlfs_free_blocks_node(get_inode_sb(handle->dev, inode),

@@ -64,6 +64,7 @@ typedef struct  _hash_entry {
 #define IS_TOMBSTONE(v) ((v) == VTOMB)
 #define IS_EMPTY(v) ((v) == VEMPTY)
 #define IS_VALID(v) (!(IS_TOMBSTONE(v) || IS_EMPTY(v)))
+
 /*
 #define HASH_IS_UNUSED(value) ((value) == UNUSED_HASH_VALUE)
 #define HASH_IS_TOMBSTONE(value) ((value) == TOMBSTONE_HASH_VALUE)
@@ -308,9 +309,12 @@ static inline void nvram_flush(GHashTable *ht) {
   if (ht->bh_cache_head) writes++;
 
   while(ht->bh_cache_head) {
+    /*
+     * The bitmap is zeroed as cachelines are written back (in mlfs_write),
+     * so by this point the bitmap is completely zeroed out.
+     */
     bh_cache_node *tmp = ht->bh_cache_head;
     bh_t *buf = ht->bh_cache[tmp->cache_index];
-    //bitmap_zero(buf->b_dirty_bitmap, g_block_size_bytes);
     buf->b_use_bitmap = 0;
     ht->bh_cache[tmp->cache_index] = NULL;
     ht->bh_cache_head = tmp->next;
@@ -370,17 +374,7 @@ nvram_alloc_range(size_t count) {
   // Mark superblock bits
   bitmap_bits_set_range(super->s_blk_bitmap, block, count);
   super->used_blocks += count;
-#if 0
-  printf("allocing range: %lu blocks (block size: %u, shift = %u)\n", count,
-      g_block_size_bytes, g_block_size_shift);
-  for (uint64_t i = 0; i < count; ++i) {
-    for (uint64_t j = 0; j < g_block_size_bytes / sizeof(mlfs_fsblk_t); ++j) {
-      mlfs_fsblk_t byte_index = (i << g_block_size_shift) + j;
-      mlfs_fsblk_t entry = nvram_read_entry(block, byte_index);
-      printf("-- %d[%d], %0lx\n", i, j, entry);
-    }
-  }
-#endif
+
   assert(err >= 0);
   assert(err == count);
 
