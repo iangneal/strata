@@ -42,6 +42,7 @@ typedef struct  _hash_entry {
   mlfs_fsblk_t key;
   mlfs_fsblk_t value;
   mlfs_fsblk_t size;
+  mlfs_fsblk_t _unused;
 } hash_entry_t;
 
 #define KB(x)   ((size_t) (x) << 10)
@@ -435,22 +436,13 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
   uint64_t size = sizeof(hash_entry_t);
   uint64_t bit_start = (BUF_IDX(index) * size);
 
-  /*
-   * It's possible that these entries overflow into two "cache lines", since
-   * they aren't aligned to units of 64 bytes.
-   */
-  size_t bit1 = bit_start / bh->b_cacheline_size;
-  size_t bit2 = (bit_start + size) / bh->b_cacheline_size;
-  bit2 = bit1 == bit2 ? 0 : bit2;
+  size_t bit = bit_start / bh->b_cacheline_size;
 
   /*
    * Tracking to make sure we write back the same number of dirty regions.
    * Test and set so we don't double count.
    */
-  bh->b_size += !__test_and_set_bit(bit1, bh->b_dirty_bitmap);
-  if (bit2) {
-    bh->b_size += !__test_and_set_bit(bit2, bh->b_dirty_bitmap);
-  }
+  bh->b_size += !__test_and_set_bit(bit, bh->b_dirty_bitmap);
 }
 
 #ifdef __cplusplus
