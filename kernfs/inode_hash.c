@@ -13,6 +13,7 @@ mlfs_fsblk_t id_map_meta_loc = 0;
 // (iangneal): Global hash table for all of NVRAM. Each inode has a point to
 // this one hash table just for abstraction of the inode interface.
 static GHashTable *ghash = NULL;
+// (iangneal): Second level hash table.
 static GHashTable *gsuper = NULL;
 
 /*
@@ -40,7 +41,7 @@ void init_hash(struct inode *inode) {
     printf("Finished initializing the single-block hash table.\n");
 
     // chunk (maps a range of blocks) hash table
-    gsuper = g_hash_table_new(g_direct_hash, sb->num_blocks * 2,
+    gsuper = g_hash_table_new(g_direct_hash, sb->num_blocks,
         RANGE_SIZE, chunk_hash_meta_loc);
     if (!gsuper) {
       panic("Failed to initialize multi-block hash table\n");
@@ -165,9 +166,14 @@ create:
     if (r > 0) {
       bitmap_bits_set_range(sb->s_blk_bitmap, blockp, r);
       sb->used_blocks += r;
-    } else if (ret == -ENOSPC) {
-      panic("Fail to allocate block\n");
+    } else if (r == -ENOSPC) {
+      panic("Failed to allocate block -- no space!\n");
+    } else if (r == -EINVAL) {
+      panic("Failed to allocate block -- invalid arguments!\n");
+    } else {
+      panic("Failed to allocate block -- unknown error!\n");
     }
+
     //printf("Starting insert: %u, %lu, %lu\n", map->m_lblk, map->m_len, len);
     for (int c = 0; c < len; ) {
       int offset = ((lb + c) & RANGE_BITS);
@@ -243,44 +249,19 @@ create:
 
 int mlfs_hash_truncate(handle_t *handle, struct inode *inode,
 		mlfs_lblk_t start, mlfs_lblk_t end) {
-
   hash_value_t size, value, index;
 
-#if 0
-  g_hash_table_iter_init (&iter, inode->htable);
-  while (g_hash_table_iter_next (&iter, &key, &value)) {
-    k = GPTR2KEY(key);
-    v = GPTR2VAL(value);
-    int size = 1;
-    /*
-    if (SPECIAL(v) && INDEX(v) > 0) {
-      printf("SKIP %d, %d, %lu\n", SPECIAL(v), INDEX(v), ADDR(v));
-      g_hash_table_iter_remove(&iter);
-      continue;
-    } else if (SPECIAL(v)) {
-      size = MAX_CONTIGUOUS_BLOCKS;
-    }
-    */
-
-    if (GET_INUM(k) == inode->inum && GET_LBLK(k) >= start
-        && GET_LBLK(k) <= end) {
-      //printf("FREE %d, %d, %lu\n", SPECIAL(v), INDEX(v), ADDR(v));
-      mlfs_free_blocks(handle, inode, NULL, GET_LBLK(k), size, 0);
-      g_hash_table_iter_remove(&iter);
-    }
-  }
-#endif
-
   // TODO: probably inefficient
-  for (mlfs_lblk_t i = start; i < end;) {
+  for (mlfs_lblk_t i = start; i <= end;) {
     if (lookup_hash(inode, i, &value, &size, &index)) {
-      mlfs_free_blocks(handle, inode, NULL, i, size, 0);
+      mlfs_fsblk_t pblock = value + index;
+      mlfs_free_blocks(handle, inode, NULL, pblock, size, 0);
       erase_hash(inode, i);
       i += size;
     }
   }
 
-  return 0;
+  return  mlfs_hash_persist();
 }
 
 double check_load_factor(struct inode *inode) {

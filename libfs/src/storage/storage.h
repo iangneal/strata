@@ -40,7 +40,7 @@ extern "C" {
 */
 
 // device size in bytes
-static uint64_t dev_size[g_n_devices + 1] = {0UL, 1073741824UL, 0UL, 0UL, 1073741824UL};
+static uint64_t dev_size[g_n_devices + 1] = {0UL, 2147483648UL, 0UL, 0UL, 1073741824UL};
 
 extern struct storage_operations storage_dax;
 extern struct storage_operations storage_spdk;

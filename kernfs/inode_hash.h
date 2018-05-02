@@ -7,10 +7,10 @@
 #include "fs.h"
 #include "extents.h"
 #include "global/util.h"
+#include "ghash.h"
 #ifdef KERNFS
 #include "balloc.h"
 #include "migrate.h"
-#include "ghash.h"
 #endif
 
 #ifdef __cplusplus

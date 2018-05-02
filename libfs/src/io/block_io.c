@@ -329,7 +329,7 @@ int mlfs_write(struct buffer_head *b)
         }
 
         do {
-          printf("write back bit %d (block %lu)\n", i, b->b_blocknr);
+          //printf("write back bit %d (block %lu)\n", i, b->b_blocknr);
           __clear_bit(i, b->b_dirty_bitmap);
           region_size++;
           i++;
@@ -344,8 +344,10 @@ int mlfs_write(struct buffer_head *b)
             b->b_blocknr,
             byte_off,
             region_size * b->b_cacheline_size);
-        printf("$ storage_engine->write_unaligned(%lu, %lu)\n",
+        /*
+         * printf("$ storage_engine->write_unaligned(%lu, %lu)\n",
             start * b->b_cacheline_size, region_size * b->b_cacheline_size);
+            */
 
         if (ret != region_size * b->b_cacheline_size) {
           mlfs_printf("%d (ret) != %lu\n", ret, region_size * b->b_cacheline_size);
