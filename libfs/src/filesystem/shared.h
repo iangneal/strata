@@ -289,6 +289,8 @@ struct inode {
 	///////////////////////////////////////////////////////////////////
 };
 
+typedef struct inode inode_t;
+
 static inline struct super_block* get_inode_sb(uint8_t dev, struct inode *inode)
 {
 	return inode->i_sb[dev];
