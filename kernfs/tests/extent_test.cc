@@ -308,30 +308,31 @@ void ExtentTest::run_ftruncate_test(mlfs_lblk_t from,
   std::uniform_int_distribution<> dist(from, to);
   handle_t handle = {.dev = g_root_dev};
 
-  for (int i = 0; i < nr_block; i++)
-  delete_list.push_back(dist(mt));
+  for (int i = 0; i < nr_block; i++) {
+    delete_list.push_back(dist(mt));
+  }
 
   for (auto it: delete_list) {
-  ret = mlfs_ext_truncate(&handle, inode, (it >> g_block_size_shift),
-    (it >> g_block_size_shift) + 1);
+    ret = mlfs_ext_truncate(&handle, inode, (it >> g_block_size_shift),
+      (it >> g_block_size_shift) + 1);
 
-  fprintf(stdout, "truncate %u, ret %d\n", it, ret);
+    fprintf(stdout, "truncate %u, ret %d\n", it, ret);
 
-  /* Try to search truncated block.
-   * mlfs_ext_get_block() must return 0
-   */
-  map.m_lblk = (it >> g_block_size_shift);
-  map.m_len = 1;
+    /* Try to search truncated block.
+     * mlfs_ext_get_block() must return 0
+     */
+    map.m_lblk = (it >> g_block_size_shift);
+    map.m_len = 1;
 
-  ret = mlfs_ext_get_blocks(NULL, inode, &map, 0);
-  fprintf(stdout, "ret %d, block %lx, len %u\n",
-    ret, map.m_pblk, map.m_len);
+    ret = mlfs_ext_get_blocks(NULL, inode, &map, 0);
+    fprintf(stdout, "ret %d, block %lx, len %u\n",
+      ret, map.m_pblk, map.m_len);
   }
 }
 
 /*
  * Returns:
- * [average insert time, average lookup time]
+ * [average insert time, average lookup time, average truncate time]
  */
 tuple<double, double>
 ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
@@ -342,6 +343,7 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   struct mlfs_map_blocks map;
   struct time_stats ts;
   struct time_stats lookup;
+  struct time_stats trunc, trunc_per;
   struct time_stats hs;
   struct time_stats ls;
   struct rusage before, after;
@@ -352,6 +354,8 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_init(&lookup, 1);
   time_stats_init(&hs, insert_order.size());
   time_stats_init(&ls, lookup_order.size());
+  time_stats_init(&trunc, 1);
+  time_stats_init(&trunc_per, insert_order.size());
 
   std::map<mlfs_lblk_t, mlfs_fsblk_t> res_check;
 
@@ -423,6 +427,8 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
       fprintf(stderr, "error on lblk %x lookup: expected %lx, got fsblk: %lx\n",
         lb, res_check[lb], map.m_pblk);
       exit(-1);
+    } else {
+      //printf("Confirmed: lblk %u -> pblk %lu\n", lb, map.m_pblk);
     }
 
 
@@ -437,8 +443,23 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
 
   cout << "truncate all allocated blocks" << endl;
 
-  mlfs_ext_truncate(&handle, inode, 0,
-      (*max_element(insert_order.begin(), insert_order.end())) - nr_block);
+  /* truncate */
+  time_stats_start(&trunc);
+  for (mlfs_lblk_t lb : insert_order) {
+    time_stats_start(&trunc_per);
+    err = mlfs_ext_truncate(&handle, inode, lb, lb + nr_block - 1);
+#ifndef HASHTABLE
+    // already persisted in get blocks
+    sync_all_buffers(g_bdev[g_root_dev]);
+#endif
+    time_stats_stop(&trunc_per);
+
+    if (err < 0) {
+      cerr << "Could not truncate! " << err << endl;
+      exit(-1);
+    }
+  }
+  time_stats_stop(&trunc);
 
   printf("** Total used block %d\n",
     bitmap_weight((uint64_t *)sb[g_root_dev]->s_blk_bitmap->bitmap,
@@ -452,12 +473,21 @@ ExtentTest::run_multi_block_test(list<mlfs_lblk_t> insert_order,
   time_stats_print(&lookup, NULL);
   cout << "LOOKUP TIME (per lookup [" << ls.n <<"] )" << endl;
   time_stats_print(&ls, NULL);
+  cout << "TRUNCATE TIME (per lookup [" << trunc_per.n <<"] )" << endl;
+  time_stats_print(&trunc_per, NULL);
+  cout << "TRUNCATE TIME (total)" << endl;
+  time_stats_print(&trunc, NULL);
 #ifdef HASHTABLE
   cout << "Reads: " << reads << " Writes: " << writes << endl;
 #endif
 
-  return tuple<double, double>(time_stats_get_avg(&hs),
-                               time_stats_get_avg(&ls));
+#if 0
+  return tuple<double, double, double>(
+      time_stats_get_avg(&hs), time_stats_get_avg(&ls),
+      time_stats_get_avg(&trunc_per));
+#else
+  return tuple<double, double>(time_stats_get_avg(&hs), time_stats_get_avg(&ls));
+#endif
 }
 
 
@@ -473,7 +503,8 @@ int main(int argc, char **argv)
 
   if (argc < 6) {
     cerr << "Usage: " << argv[0] << " INSERT_ORDER LOOKUP_ORDER" <<
-     " BLOCK_CHUCK_SIZE INSERT_OUTPUT_FILE LOOKUP_OUTPUT_FILE" <<  endl;
+     " BLOCK_CHUCK_SIZE INSERT_OUTPUT_FILE LOOKUP_OUTPUT_FILE" <<
+     " TRUNCATE_OUTPUT_FILE" << endl;
     return 1;
   }
 
@@ -482,6 +513,7 @@ int main(int argc, char **argv)
   int b = atoi(argv[3]);
   string insert_data_file(argv[4]);
   string lookup_data_file(argv[5]);
+  //string truncate_data_file(argv[6]);
 
   if (b <= 0) {
     cerr << "ERROR: number of blocks (arg 3) must be positive, not " << b

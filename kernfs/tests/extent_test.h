@@ -1,3 +1,4 @@
+// vim: set ft=cpp:
 #include "kernfs_interface.h"
 #include "../io/block_io.h"
 #include "../io/buffer_head.h"
@@ -14,6 +15,7 @@
 #include "../extents_bh.h"
 #include "../slru.h"
 #include "../migrate.h"
+
 #ifdef HASHTABLE
 #include "../inode_hash.h"
 extern uint64_t reads;
@@ -33,15 +35,9 @@ extern uint64_t writes;
 #include <malloc.h>
 
 #include "time_stat.h"
+#include "test_gen.h"
 
 using namespace std;
-
-enum SequenceType {
-  SEQUENTIAL = 0, REVERSE, RANDOM
-};
-
-const char* SequenceTypeNames[] = { "sequential", "reverse", "random" };
-const char* SequenceTypeAbbr[] = { "seq", "rev", "rand" };
 
 class ExtentTest
 {
@@ -56,7 +52,7 @@ class ExtentTest
   static void hexdump(void *mem, unsigned int len);
 
   list<mlfs_lblk_t> genLogicalBlockSequence(SequenceType s, mlfs_lblk_t from,
-      mlfs_lblk_t ti, uint32_t nr_block);
+      mlfs_lblk_t to, uint32_t nr_block);
 
   list<mlfs_lblk_t> genLogicalBlockSequence(SequenceType s,
       const list<mlfs_lblk_t>& insert_order);
