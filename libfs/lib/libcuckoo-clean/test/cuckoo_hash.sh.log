@@ -1,0 +1,7 @@
+Running the test for 500000 elements
+used memory: 16781312
+load factor: 0.953674
+insert: 0.210141 sec
+lookup (x 1): 0.101162 sec
+traverse (x 1): 0.014544 sec
+remove: 0.099139 sec

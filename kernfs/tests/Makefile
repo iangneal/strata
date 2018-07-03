@@ -25,9 +25,10 @@ LD_FLAGS = -lpthread -lm -L$(NVML_DIR)/nondebug/ -lpmem -lrt \
 LD_FLAGS_CXX = -lpthread -lm -L$(NVML_DIR)/nondebug/ -lpmem -lrt \
 	-L$(abspath $(C_LIBCUCKOO_DIR)/.libs) -lcuckoo_hash -Wl,-rpath=$(abspath $(C_LIBCUCKOO_DIR)/.libs) \
 	-Wl,-rpath=$(abspath $(GLIB_DIR)/glib/.libs) -L$(abspath $(GLIB_DIR)/glib/.libs) #-lglib-2.0
-#DEBUG = -g -O0
-DEBUG = -g -Ofast
-#DEBUG = -O3
+
+DEBUG = -g -O0
+#DEBUG = -g -Ofast
+#DEBUG = -g -O3
 
 #MLFS_FLAGS = -DUSE_SLAB -DMLFS_INFO -DKERNFS
 MLFS_FLAGS = -DMLFS_INFO -DKERNFS
