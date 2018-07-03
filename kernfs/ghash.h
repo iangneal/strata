@@ -38,12 +38,7 @@ extern "C" {
 #include "gtypes.h"
 
 // For the big hash table, mapping (inode, lblk) -> single block
-typedef struct  _hash_entry {
-  mlfs_fsblk_t key;
-  mlfs_fsblk_t value;
-  mlfs_fsblk_t size;
-  mlfs_fsblk_t _unused;
-} hash_entry_t;
+#include "nvhash/hash_base.h"
 
 #define KB(x)   ((size_t) (x) << 10)
 #define MB(x)   ((size_t) (x) << 20)

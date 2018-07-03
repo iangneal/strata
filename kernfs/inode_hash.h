@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+#include "nvhash/hash_log.h"
+
 #define CONTINUITY_BITS 4
 #define MAX_CONTIGUOUS_BLOCKS (2 << 4)
 #define REMAINING_BITS ((CHAR_BIT * sizeof(mlfs_fsblk_t)) - CONTINUITY_BITS - 1)
