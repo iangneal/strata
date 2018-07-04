@@ -114,7 +114,7 @@ typedef struct _GHashTable {
 
   // concurrency
   pthread_rwlock_t *locks;
-  pthread_mutex_t *metalock;
+  pthread_mutex_t  *metalock;
 
   // caching
 #ifdef HASHCACHE
@@ -142,30 +142,32 @@ GHashTable* g_hash_table_new(GHashFunc    hash_func,
 
 void  g_hash_table_destroy(GHashTable     *hash_table);
 
-int g_hash_table_insert(GHashTable *hash_table,
-                        mlfs_fsblk_t       key,
-                        mlfs_fsblk_t       value,
-                        mlfs_fsblk_t       range);
+int g_hash_table_insert(GHashTable   *hash_table,
+                        mlfs_fsblk_t  key,
+                        mlfs_fsblk_t  value,
+                        mlfs_fsblk_t  range);
 
-int g_hash_table_replace(GHashTable *hash_table,
+int g_hash_table_replace(GHashTable  *hash_table,
                          mlfs_fsblk_t key,
                          mlfs_fsblk_t value);
 
-int g_hash_table_add(GHashTable *hash_table,
-                     mlfs_fsblk_t key);
+int g_hash_table_add(GHashTable   *hash_table,
+                     mlfs_fsblk_t  key);
 
-int g_hash_table_remove(GHashTable *hash_table,
-                        mlfs_fsblk_t key);
+int g_hash_table_remove(GHashTable   *hash_table,
+                        mlfs_fsblk_t  key);
 
 void g_hash_table_remove_all(GHashTable *hash_table);
 
-int g_hash_table_steal(GHashTable *hash_table,
-                       mlfs_fsblk_t key);
+int g_hash_table_steal(GHashTable   *hash_table,
+                       mlfs_fsblk_t  key);
 
 void g_hash_table_steal_all(GHashTable *hash_table);
 
-void g_hash_table_lookup(GHashTable *hash_table, mlfs_fsblk_t key,
-    mlfs_fsblk_t *val, mlfs_fsblk_t *size);
+void g_hash_table_lookup(GHashTable   *hash_table,
+                         mlfs_fsblk_t  key,
+                         mlfs_fsblk_t *val,
+                         mlfs_fsblk_t *size);
 
 int g_hash_table_contains(GHashTable *hash_table,
                           mlfs_fsblk_t key);
@@ -182,10 +184,11 @@ void* g_hash_table_find(GHashTable *hash_table,
 unsigned g_hash_table_size(GHashTable *hash_table);
 
 void** g_hash_table_get_keys_as_array(GHashTable *hash_table,
-                                      unsigned *length);
+                                      unsigned   *length);
 
 
-/* Hash Functions
+/*
+ * Hash Functions
  */
 
 unsigned g_direct_hash (const void *v);
@@ -336,7 +339,6 @@ nvram_write_metadata(GHashTable *hash, mlfs_fsblk_t location) {
   metadata.noccupied = hash->noccupied;
   metadata.data_start = hash->data;
 
-
   // TODO: maybe generalize for other devices.
   bh = bh_get_sync_IO(g_root_dev, location, BH_NO_DATA_ALLOC);
   assert(bh);
@@ -416,7 +418,9 @@ nvram_update(GHashTable *ht, mlfs_fsblk_t index, hash_entry_t* val) {
 
     bh_cache_node *tmp = (bh_cache_node*)malloc(sizeof(*tmp));
 
-    if (unlikely(!tmp)) panic("ENOMEM");
+    if (unlikely(!tmp)) {
+      panic("ENOMEM");
+    }
 
     tmp->cache_index = NV_IDX(index);
     tmp->next = ht->bh_cache_head;

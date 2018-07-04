@@ -7,7 +7,6 @@
 #include "fs.h"
 #include "extents.h"
 #include "global/util.h"
-#include "ghash.h"
 #ifdef KERNFS
 #include "balloc.h"
 #include "migrate.h"
@@ -17,7 +16,7 @@
 extern "C" {
 #endif
 
-#include "nvhash/hash_log.h"
+#include "nvhash/hash.h"
 
 #define CONTINUITY_BITS 4
 #define MAX_CONTIGUOUS_BLOCKS (2 << 4)

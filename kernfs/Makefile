@@ -5,7 +5,7 @@
 #
 ########
 
-SUBDIR	:= io cache concurrency global ds mlfs storage .
+SUBDIR	:= io cache concurrency global ds mlfs storage nvhash .
 
 SRC_DIR   := $(addprefix , $(SUBDIR))
 BUILD_DIR := $(addprefix build/, $(SUBDIR))

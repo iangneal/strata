@@ -10,6 +10,8 @@ extern "C" {
 #include "../balloc.h"
 #include "../fs.h"
 
+// Local includes
+
 #if !(GLIB_HASH ^ CUCKOO_HASH)
 #warning ("Should define either GLIB_HASH to 1 or CUCKOO_HASH to 1. " \
           "Defaulting to GLIB_HASH...")
@@ -24,10 +26,17 @@ typedef struct  _hash_entry {
   mlfs_fsblk_t size;
   mlfs_fsblk_t _unused;
 } hash_entry_t;
+
+typedef struct _hash_table {
+} hash_table_t;
 #elif CUCKOO_HASH
 #else
 #error "Need to have a type of hash table selected!"
 #endif
+
+typedef struct _hash_functions {
+  int _placeholder;
+} hash_functions_t;
 
 #ifdef __cplusplus
 }

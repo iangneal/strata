@@ -1,6 +1,5 @@
 #include "test_gen.h"
 
-
 std::shared_ptr<inode_t> TestGenerator::CreateInode(uint32_t inum) {
   struct mlfs_extent_header *ihdr;
   inode_t *inode = ialloc(dev_handle_.dev, T_FILE, inum);
